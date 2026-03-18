@@ -20,6 +20,13 @@ mod http {
 
         assert!(resp_value.is_instance_of::<Response>());
         let resp: Response = resp_value.dyn_into().unwrap();
+        let status = resp.status();
+        if !resp.ok() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("http fetch failed for {url} with status {status}"),
+            ));
+        }
         let js = JsFuture::from(resp.array_buffer().map_err(to_io_err)?)
             .await
             .map_err(to_io_err)?;
