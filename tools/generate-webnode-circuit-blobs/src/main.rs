@@ -1,0 +1,94 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use ledger::proofs::{
+    caching::verifier_index_to_bytes,
+    verifiers::{BlockVerifier, TransactionVerifier},
+    VerifierIndex,
+};
+use mina_core::NetworkConfig;
+use mina_curves::pasta::Fq;
+use sha2::{Digest, Sha256};
+
+const DEVNET_BLOCK_VERIFIER_SRC: &str =
+    include_str!("../../../crates/ledger/src/proofs/data/devnet_blockchain_verifier_index.json");
+const DEVNET_TRANSACTION_VERIFIER_SRC: &str =
+    include_str!("../../../crates/ledger/src/proofs/data/devnet_transaction_verifier_index.json");
+const MAINNET_BLOCK_VERIFIER_SRC: &str =
+    include_str!("../../../crates/ledger/src/proofs/data/mainnet_blockchain_verifier_index.json");
+const MAINNET_TRANSACTION_VERIFIER_SRC: &str =
+    include_str!("../../../crates/ledger/src/proofs/data/mainnet_transaction_verifier_index.json");
+
+#[derive(Debug, Parser)]
+struct Args {
+    #[arg(long, default_value = "devnet")]
+    network: String,
+
+    #[arg(long, default_value = "/home/mtrapaglia/mina/assets/webnode/circuit-blobs")]
+    out_root: PathBuf,
+}
+
+fn source_json(network: &str, is_block: bool) -> &'static str {
+    match (network, is_block) {
+        ("devnet", true) => DEVNET_BLOCK_VERIFIER_SRC,
+        ("devnet", false) => DEVNET_TRANSACTION_VERIFIER_SRC,
+        ("mainnet", true) => MAINNET_BLOCK_VERIFIER_SRC,
+        ("mainnet", false) => MAINNET_TRANSACTION_VERIFIER_SRC,
+        (other, _) => panic!("unsupported network '{other}'"),
+    }
+}
+
+fn blob_bytes(src_json: &str, verifier_index: &VerifierIndex<Fq>) -> Result<Vec<u8>> {
+    let verifier_index_bytes = verifier_index_to_bytes(verifier_index)
+        .context("serializing verifier index to postcard bytes")?;
+    let src_digest = Sha256::digest(src_json.as_bytes());
+    let verifier_index_digest = Sha256::digest(&verifier_index_bytes);
+
+    let mut blob = Vec::with_capacity(64 + verifier_index_bytes.len());
+    blob.extend_from_slice(&src_digest);
+    blob.extend_from_slice(&verifier_index_digest);
+    blob.extend_from_slice(&verifier_index_bytes);
+    Ok(blob)
+}
+
+fn write_blob(path: &Path, src_json: &str, verifier_index: &VerifierIndex<Fq>) -> Result<()> {
+    let blob = blob_bytes(src_json, verifier_index)?;
+    fs::write(path, blob).with_context(|| format!("writing {}", path.display()))
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+    NetworkConfig::init(&args.network)
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("initializing network '{}'", args.network))?;
+
+    let circuits_dir = NetworkConfig::global().circuits_config.directory_name;
+    let out_dir = args.out_root.join(circuits_dir);
+    fs::create_dir_all(&out_dir)
+        .with_context(|| format!("creating {}", out_dir.display()))?;
+
+    let block_path = out_dir.join("block_verifier_index.postcard");
+    let tx_path = out_dir.join("transaction_verifier_index.postcard");
+
+    let block_verifier = BlockVerifier::make();
+    write_blob(
+        &block_path,
+        source_json(NetworkConfig::global().name, true),
+        &block_verifier,
+    )?;
+
+    let tx_verifier = TransactionVerifier::make();
+    write_blob(
+        &tx_path,
+        source_json(NetworkConfig::global().name, false),
+        &tx_verifier,
+    )?;
+
+    println!("{}", block_path.display());
+    println!("{}", tx_path.display());
+    Ok(())
+}

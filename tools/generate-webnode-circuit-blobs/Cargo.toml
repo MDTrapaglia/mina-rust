@@ -1,0 +1,13 @@
+[package]
+name = "generate-webnode-circuit-blobs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+ledger = { workspace = true }
+mina-core = { workspace = true }
+mina-curves = { workspace = true }
+sha2 = { workspace = true }

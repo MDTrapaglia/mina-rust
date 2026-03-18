@@ -26,6 +26,7 @@ members = [
   "tools/archive-breadcrumb-compare",
   "tools/bootstrap-sandbox",
   "tools/fuzzing",
+  "tools/generate-webnode-circuit-blobs",
   "tools/gossipsub-sandbox",
   "tools/hash-tool",
   "tools/ledger-tool",
