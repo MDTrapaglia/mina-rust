@@ -25,18 +25,45 @@ use crate::node::P2pTaskRemoteSpawner;
 /// Automatically run after wasm is loaded.
 #[wasm_bindgen(start)]
 fn main() {
+    trace_stage("module.start.enter");
+
+    if !thread::is_web_worker_thread() {
+        thread::Builder::new()
+            .worker_script_url("/wasm-smoke/mina-worker-module.js".to_owned())
+            .wasm_bindgen_shim_url("/mina-rust/pkg/mina_node_web.js".to_owned())
+            .set_default();
+        trace_stage("module.start.builder_default_set");
+    }
+
     thread::main_thread_init();
+    trace_stage("module.start.main_thread_init.done");
     wasm_bindgen_futures::spawn_local(async {
         console_error_panic_hook::set_once();
         tracing::initialize(tracing::Level::DEBUG);
+        trace_stage("module.start.init_rayon.begin");
 
         init_rayon().await.unwrap();
+        trace_stage("module.start.init_rayon.complete");
     });
 }
 
 #[wasm_bindgen]
 pub fn build_env() -> JsValue {
     JsValue::from_serde(&::mina_node::BuildEnv::get()).unwrap_or_default()
+}
+
+fn trace_stage(stage: &str) {
+    let thread_kind = if thread::is_web_worker_thread() {
+        "worker"
+    } else {
+        "main"
+    };
+    let payload = serde_json::to_string(&format!("{thread_kind}:{stage}"))
+        .unwrap_or_else(|_| "\"trace-stage-encode-error\"".to_owned());
+    let script = format!(
+        "self.fetch('/wasm-smoke/trace?stage=' + encodeURIComponent({payload}), {{ cache: 'no-store' }}).catch(() => undefined);"
+    );
+    let _ = js_sys::eval(&script);
 }
 
 fn parse_bp_key(key: JsValue) -> Option<AccountSecretKey> {
@@ -128,10 +155,22 @@ pub async fn run(
     genesis_config_url: Option<String>,
 ) -> RpcSender {
     let block_producer = parse_bp_key(block_producer);
+    let seed_nodes_urls_len = seed_nodes_urls.as_ref().map_or(0, Vec::len);
+    let seed_nodes_addresses_len = seed_nodes_addresses.as_ref().map_or(0, Vec::len);
+    let has_genesis_config_url = genesis_config_url.is_some();
+    let has_block_producer = block_producer.is_some();
+
+    log::info!(
+        "mina-node-web run(): start; block_producer={has_block_producer}; seed_urls={seed_nodes_urls_len}; seed_addresses={seed_nodes_addresses_len}; custom_genesis={has_genesis_config_url}"
+    );
+    trace_stage("run.start");
 
     let (rpc_sender_tx, rpc_sender_rx) = ::mina_node::core::channels::oneshot::channel();
+    trace_stage("run.spawn.before");
     let _ = thread::spawn(move || {
+        trace_stage("run.worker.enter");
         wasm_bindgen_futures::spawn_local(async move {
+            trace_stage("run.worker.spawn_local.enter");
             let mut node = setup_node(
                 block_producer,
                 seed_nodes_urls,
@@ -139,14 +178,23 @@ pub async fn run(
                 genesis_config_url,
             )
             .await;
+            trace_stage("run.worker.setup_node.complete");
             let _ = rpc_sender_tx.send(node.rpc());
+            trace_stage("run.worker.rpc_sender.sent");
             node.run_forever().await;
         });
+        trace_stage("run.worker.spawn_local.scheduled");
 
+        trace_stage("run.worker.keepalive");
+        trace_stage("run.worker.keepalive.before_throw");
         keep_worker_alive_cursed_hack();
     });
+    trace_stage("run.spawn.after");
 
-    rpc_sender_rx.await.unwrap()
+    let rpc = rpc_sender_rx.await.unwrap();
+    trace_stage("run.rpc_sender.received");
+    log::info!("mina-node-web run(): rpc sender received by caller");
+    rpc
 }
 
 async fn setup_node(
@@ -155,9 +203,22 @@ async fn setup_node(
     seed_nodes_addresses: Option<Vec<String>>,
     genesis_config_url: Option<String>,
 ) -> mina_node_common::Node<NodeService> {
-    let block_verifier_index = BlockVerifier::make().await;
-    let work_verifier_index = TransactionVerifier::make().await;
+    let seed_nodes_urls_len = seed_nodes_urls.as_ref().map_or(0, Vec::len);
+    let seed_nodes_addresses_len = seed_nodes_addresses.as_ref().map_or(0, Vec::len);
+    let has_genesis_config_url = genesis_config_url.is_some();
+    let has_block_producer = block_producer.is_some();
 
+    trace_stage("setup.start");
+
+    trace_stage("setup.block_verifier.begin");
+    let block_verifier_index = BlockVerifier::make().await;
+    trace_stage("setup.block_verifier.complete");
+
+    trace_stage("setup.tx_verifier.begin");
+    let work_verifier_index = TransactionVerifier::make().await;
+    trace_stage("setup.tx_verifier.complete");
+
+    trace_stage("setup.genesis.begin");
     let genesis_config = if let Some(genesis_config_url) = genesis_config_url {
         let bytes = ::mina_node::core::http::get_bytes(&genesis_config_url)
             .await
@@ -166,21 +227,24 @@ async fn setup_node(
     } else {
         ::mina_node::config::DEVNET_CONFIG.clone()
     };
+    trace_stage("setup.genesis.complete");
 
+    trace_stage("setup.builder.begin");
     let mut node_builder: NodeBuilder = NodeBuilder::new(None, genesis_config);
     node_builder
         .block_verifier_index(block_verifier_index.clone())
         .work_verifier_index(work_verifier_index.clone());
+    trace_stage("setup.builder.verifiers_wired");
 
     // TODO(binier): refactor
     let mut all_raw_peers = seed_nodes_addresses.unwrap_or_default();
 
     if let Some(seed_nodes_urls) = seed_nodes_urls {
+        trace_stage("setup.seed_urls.begin");
         for seed_nodes_url in seed_nodes_urls {
             let peers = ::mina_node::core::http::get_bytes(&seed_nodes_url).await;
             match peers {
                 Ok(s) => {
-                    log::info!("Successfully fetched peers from {seed_nodes_url}");
                     all_raw_peers.extend(String::from_utf8_lossy(&s).split("\n").map(String::from));
                 }
                 Err(e) => {
@@ -188,8 +252,10 @@ async fn setup_node(
                 }
             }
         }
+        trace_stage("setup.seed_urls.complete");
     }
 
+    trace_stage("setup.initial_peers.begin");
     node_builder.initial_peers(
         all_raw_peers
             .iter()
@@ -198,19 +264,26 @@ async fn setup_node(
             .flat_map(|s| s.parse().ok())
             .inspect(|p| log::debug!("Using peer: {p:?}")),
     );
+    trace_stage("setup.initial_peers.complete");
 
     if let Some(bp_key) = block_producer {
+        trace_stage("setup.block_producer.begin");
         thread::spawn(move || {
             BlockProver::make(Some(block_verifier_index), Some(work_verifier_index));
         });
         node_builder.block_producer(bp_key, None);
+        trace_stage("setup.block_producer.complete");
     }
 
+    trace_stage("setup.service.begin");
     node_builder
         .p2p_custom_task_spawner(P2pTaskRemoteSpawner {})
         .unwrap();
     node_builder.gather_stats();
-    node_builder.build().context("node build failed!").unwrap()
+    trace_stage("setup.build.begin");
+    let node = node_builder.build().context("node build failed!").unwrap();
+    trace_stage("setup.build.complete");
+    node
 }
 
 fn keep_worker_alive_cursed_hack() {

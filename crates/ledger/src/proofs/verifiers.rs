@@ -9,6 +9,8 @@ use mina_core::{info, log::system_time, warn};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[cfg(target_family = "wasm")]
+use wasm_bindgen::prelude::*;
 
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use kimchi::{
@@ -18,7 +20,7 @@ use kimchi::{
         lookup::lookups::{LookupFeatures, LookupPatterns},
         polynomials::permutation::{permutation_vanishing_polynomial, zk_w},
     },
-    linearization::expr_linearization,
+    linearization::{constraints_expr, expr_linearization, linearization_columns},
     mina_curves::pasta::Pallas,
 };
 use mina_curves::pasta::{Fp, Fq};
@@ -57,9 +59,164 @@ impl std::fmt::Display for Kind {
     }
 }
 
+#[cfg(target_family = "wasm")]
+#[wasm_bindgen(inline_js = r#"
+export function codex_trace_verifiers(stage) {
+  const url = '/wasm-smoke/trace?stage=' + encodeURIComponent(stage);
+  self.fetch(url, { cache: 'no-store' }).catch(() => undefined);
+}
+
+export function codex_trace_verifiers_now() {
+  if (self.performance && typeof self.performance.now === 'function') {
+    return self.performance.now();
+  }
+  return Date.now();
+}"#)]
+extern "C" {
+    fn codex_trace_verifiers(stage: &str);
+    fn codex_trace_verifiers_now() -> f64;
+}
+
+#[cfg(target_family = "wasm")]
+fn trace_stage(kind: Kind, stage: &str) {
+    let stage = format!("ledger-verifiers:{}:{stage}", kind.to_str());
+    codex_trace_verifiers(&stage);
+}
+
+#[cfg(target_family = "wasm")]
+fn trace_now_ms() -> u64 {
+    codex_trace_verifiers_now().round() as u64
+}
+
 fn cache_filename(kind: Kind) -> PathBuf {
     let circuits_config = mina_core::NetworkConfig::global().circuits_config;
     Path::new(circuits_config.directory_name).join(kind.filename())
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn verify_payload_digest(_kind: Kind, expected: &[u8; 32], slice: &[u8]) -> anyhow::Result<()> {
+    let mut hasher = Sha256::new();
+    hasher.update(slice);
+    let digest = hasher.finalize();
+    if expected != digest.as_slice() {
+        anyhow::bail!("verifier index digest verification failed");
+    }
+    Ok(())
+}
+
+#[cfg(target_family = "wasm")]
+fn verify_payload_digest(kind: Kind, expected: &[u8; 32], slice: &[u8]) -> anyhow::Result<()> {
+    const HASH_CHUNK_SIZE: usize = 8 * 1024;
+
+    let mut hasher = Sha256::new();
+    let hash_started_at_ms = trace_now_ms();
+    trace_stage(kind, "read_cache.payload_digest.verify.begin");
+    trace_stage(
+        kind,
+        &format!("read_cache.payload_digest.len.{}", slice.len()),
+    );
+    trace_stage(
+        kind,
+        &format!("read_cache.payload_digest.hash.chunk_size.{HASH_CHUNK_SIZE}"),
+    );
+    trace_stage(kind, "read_cache.payload_digest.hash.begin");
+
+    let probe_len = slice.len().min(8 * 1024);
+    if probe_len > 1 {
+        let mut probe = Sha256::new();
+        let split = probe_len / 2;
+        trace_stage(
+            kind,
+            &format!("read_cache.payload_digest.probe.begin.{probe_len}"),
+        );
+        trace_stage(
+            kind,
+            &format!("read_cache.payload_digest.probe.chunk.0.begin.{split}"),
+        );
+        probe.update(&slice[..split]);
+        trace_stage(
+            kind,
+            &format!("read_cache.payload_digest.probe.chunk.0.complete.{split}"),
+        );
+        trace_stage(
+            kind,
+            &format!(
+                "read_cache.payload_digest.probe.chunk.1.begin.{}",
+                probe_len - split
+            ),
+        );
+        probe.update(&slice[split..probe_len]);
+        trace_stage(
+            kind,
+            &format!(
+                "read_cache.payload_digest.probe.chunk.1.complete.{}",
+                probe_len
+            ),
+        );
+        let _ = probe.finalize();
+        trace_stage(kind, "read_cache.payload_digest.probe.complete");
+    }
+
+    let mut processed = 0usize;
+    for (chunk_idx, chunk) in slice.chunks(HASH_CHUNK_SIZE).enumerate() {
+        let next_processed = processed + chunk.len();
+        let chunk_started_at_ms = trace_now_ms();
+        if chunk_idx < 4 || next_processed == slice.len() || chunk_idx % 16 == 0 {
+            trace_stage(
+                kind,
+                &format!(
+                    "read_cache.payload_digest.hash.chunk.{chunk_idx}.begin.{processed}.{}.t{}",
+                    chunk.len(),
+                    chunk_started_at_ms.saturating_sub(hash_started_at_ms)
+                ),
+            );
+        }
+        hasher.update(chunk);
+        let chunk_completed_at_ms = trace_now_ms();
+        processed = next_processed;
+
+        let chunk_elapsed_ms = chunk_completed_at_ms.saturating_sub(chunk_started_at_ms);
+        if chunk_idx < 4 || processed == slice.len() || chunk_idx % 16 == 0 || chunk_elapsed_ms >= 250
+        {
+            trace_stage(
+                kind,
+                &format!(
+                    "read_cache.payload_digest.hash.chunk.{chunk_idx}.complete.{processed}.dt{}.t{}",
+                    chunk_elapsed_ms,
+                    chunk_completed_at_ms.saturating_sub(hash_started_at_ms)
+                ),
+            );
+        }
+
+        if processed == chunk.len() || processed == slice.len() || processed % (1024 * 1024) == 0
+        {
+            trace_stage(
+                kind,
+                &format!(
+                    "read_cache.payload_digest.hash.progress.{processed}.t{}",
+                    chunk_completed_at_ms.saturating_sub(hash_started_at_ms)
+                ),
+            );
+        }
+    }
+
+    trace_stage(
+        kind,
+        &format!(
+            "read_cache.payload_digest.hash.complete.t{}",
+            trace_now_ms().saturating_sub(hash_started_at_ms)
+        ),
+    );
+    trace_stage(kind, "read_cache.payload_digest.finalize.begin");
+    let digest = hasher.finalize();
+    trace_stage(kind, "read_cache.payload_digest.finalize.complete");
+    trace_stage(kind, "read_cache.payload_digest.compare.begin");
+    if expected != digest.as_slice() {
+        anyhow::bail!("verifier index digest verification failed");
+    }
+    trace_stage(kind, "read_cache.payload_digest.compare.complete");
+    trace_stage(kind, "read_cache.payload_digest.verify.complete");
+    Ok(())
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -69,31 +226,45 @@ fn cache_path(kind: Kind) -> Option<PathBuf> {
 
 macro_rules! read_cache {
     ($kind: expr, $digest: expr) => {{
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "read_cache.begin");
         #[cfg(not(target_family = "wasm"))]
         let data = super::circuit_blobs::fetch_blocking(&cache_filename($kind))
             .context("fetching verifier index failed")?;
         #[cfg(target_family = "wasm")]
-        let data = super::circuit_blobs::fetch(&cache_filename($kind))
-            .await
-            .context("fetching verifier index failed")?;
+        let data = {
+            trace_stage($kind, "read_cache.fetch.begin");
+            let data = super::circuit_blobs::fetch(&cache_filename($kind))
+                .await
+                .context("fetching verifier index failed")?;
+            trace_stage($kind, "read_cache.fetch.complete");
+            data
+        };
         let mut slice = data.as_slice();
         let mut d = [0; 32];
         // source digest
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "read_cache.source_digest.read.begin");
         slice.read_exact(&mut d).context("reading source digest")?;
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "read_cache.source_digest.read.complete");
         if d != $digest {
             anyhow::bail!("source digest verification failed");
         }
 
         // index digest
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "read_cache.index_digest.read.begin");
         slice.read_exact(&mut d).context("reading index digest")?;
-
-        let mut hasher = Sha256::new();
-        hasher.update(slice);
-        let digest = hasher.finalize();
-        if d != digest.as_slice() {
-            anyhow::bail!("verifier index digest verification failed");
-        }
-        Ok(super::caching::verifier_index_from_bytes(slice)?)
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "read_cache.index_digest.read.complete");
+        verify_payload_digest($kind, &d, slice)?;
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "read_cache.decode.begin");
+        let verifier_index = super::caching::verifier_index_from_bytes(slice)?;
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "read_cache.decode.complete");
+        Ok(verifier_index)
     }};
 }
 
@@ -131,24 +302,45 @@ fn write_cache(kind: Kind, index: &VerifierIndex<Fq>, digest: &[u8]) -> anyhow::
 
 macro_rules! make_with_ext_cache {
     ($kind: expr, $data: expr) => {{
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "parse.begin");
         let verifier_index: VerifierIndex<Fq> = serde_json::from_str($data).unwrap();
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "parse.complete");
         let mut hasher = Sha256::new();
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "src_digest.begin");
         hasher.update($data);
         let src_index_digest = hasher.finalize();
+        #[cfg(target_family = "wasm")]
+        trace_stage($kind, "src_digest.complete");
 
         #[cfg(not(target_family = "wasm"))]
         let cache = read_cache($kind, &src_index_digest);
         #[cfg(target_family = "wasm")]
-        let cache = read_cache($kind, &src_index_digest).await;
+        let cache = {
+            trace_stage($kind, "read_cache.call.begin");
+            let cache = read_cache($kind, &src_index_digest).await;
+            trace_stage($kind, "read_cache.call.complete");
+            cache
+        };
 
         match cache {
             Ok(verifier_index) => {
+                #[cfg(target_family = "wasm")]
+                trace_stage($kind, "cache.hit");
                 info!(system_time(); "Verifier index is loaded");
                 verifier_index
             }
             Err(err) => {
+                #[cfg(target_family = "wasm")]
+                trace_stage($kind, "cache.miss");
                 warn!(system_time(); "Cannot load verifier index: {err}");
-                let index = make_verifier_index(verifier_index);
+                #[cfg(target_family = "wasm")]
+                trace_stage($kind, "make_verifier_index.begin");
+                let index = make_verifier_index($kind, verifier_index);
+                #[cfg(target_family = "wasm")]
+                trace_stage($kind, "make_verifier_index.complete");
                 #[cfg(not(target_family = "wasm"))]
                 if let Err(err) = write_cache($kind, &index, &src_index_digest) {
                     warn!(system_time(); "Cannot store verifier index to cache file: {err}");
@@ -306,10 +498,14 @@ impl From<TransactionVerifier> for Arc<VerifierIndex<Fq>> {
     }
 }
 
-fn make_verifier_index(index: VerifierIndex<Fq>) -> VerifierIndex<Fq> {
+fn make_verifier_index(kind: Kind, index: VerifierIndex<Fq>) -> VerifierIndex<Fq> {
     let domain = index.domain;
     let max_poly_size: usize = index.max_poly_size;
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.endo.begin");
     let (endo, _) = endos::<Fq>();
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.endo.complete");
 
     let feature_flags = FeatureFlags {
         range_check0: false,
@@ -330,8 +526,35 @@ fn make_verifier_index(index: VerifierIndex<Fq>) -> VerifierIndex<Fq> {
         },
     };
 
-    let (mut linearization, powers_of_alpha) = expr_linearization(Some(&feature_flags), true);
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.columns.begin");
+    let evaluated_cols = linearization_columns::<Fq>(Some(&feature_flags));
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.columns.complete");
 
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.constraints.begin");
+    let (expr, powers_of_alpha) = constraints_expr(Some(&feature_flags), true);
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.constraints.complete");
+
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.linearize.begin");
+    let mut linearization = expr
+        .linearize(evaluated_cols)
+        .unwrap()
+        .map(|e| e.to_polish());
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.linearize.complete");
+
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.index_terms.assert.begin");
+    assert_eq!(linearization.index_terms.len(), 0);
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.index_terms.assert.complete");
+
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.sort.begin");
     let linearization = Linearization {
         constant_term: linearization.constant_term,
         index_terms: {
@@ -342,20 +565,38 @@ fn make_verifier_index(index: VerifierIndex<Fq>) -> VerifierIndex<Fq> {
             linearization.index_terms
         },
     };
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.linearization.sort.complete");
 
     // <https://github.com/o1-labs/proof-systems/blob/2702b09063c7a48131173d78b6cf9408674fd67e/kimchi/src/verifier_index.rs#L310-L314>
     let srs = {
+        #[cfg(target_family = "wasm")]
+        trace_stage(kind, "make_verifier_index.srs.create.begin");
         let srs = SRS::create(max_poly_size);
+        #[cfg(target_family = "wasm")]
+        trace_stage(kind, "make_verifier_index.srs.create.complete");
+        #[cfg(target_family = "wasm")]
+        trace_stage(kind, "make_verifier_index.srs.lagrange.begin");
         srs.get_lagrange_basis(domain);
+        #[cfg(target_family = "wasm")]
+        trace_stage(kind, "make_verifier_index.srs.lagrange.complete");
         Arc::new(srs)
     };
 
     // <https://github.com/o1-labs/proof-systems/blob/2702b09063c7a48131173d78b6cf9408674fd67e/kimchi/src/verifier_index.rs#L319>
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.permutation.begin");
     let permutation_vanishing_polynomial_m =
         permutation_vanishing_polynomial(domain, index.zk_rows);
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.permutation.complete");
 
     // <https://github.com/o1-labs/proof-systems/blob/2702b09063c7a48131173d78b6cf9408674fd67e/kimchi/src/verifier_index.rs#L324>
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.zk_w.begin");
     let w = zk_w(domain, index.zk_rows);
+    #[cfg(target_family = "wasm")]
+    trace_stage(kind, "make_verifier_index.zk_w.complete");
 
     VerifierIndex::<Fq> {
         srs,

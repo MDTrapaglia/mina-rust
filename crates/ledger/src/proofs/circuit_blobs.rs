@@ -111,6 +111,23 @@
 //! - [`crate::proofs::constants`]: Circuit type definitions
 
 use std::path::Path;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_family = "wasm")]
+#[wasm_bindgen(inline_js = r#"
+export function codex_trace_circuit_blobs(stage) {
+  self.fetch('/wasm-smoke/trace?stage=' + encodeURIComponent(stage), { cache: 'no-store' }).catch(() => undefined);
+}"#)]
+extern "C" {
+    fn codex_trace_circuit_blobs(stage: &str);
+}
+
+#[cfg(target_family = "wasm")]
+fn trace_stage(stage: &str) {
+    let stage = format!("circuit-blobs:{stage}");
+    codex_trace_circuit_blobs(&stage);
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub fn home_base_dir() -> Option<std::path::PathBuf> {
@@ -184,10 +201,14 @@ pub fn fetch_blocking(filename: &impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
 
 #[cfg(target_family = "wasm")]
 pub async fn fetch(filename: &impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
+    trace_stage("fetch.begin");
     let prefix =
         option_env!("CIRCUIT_BLOBS_HTTP_PREFIX").unwrap_or("/assets/webnode/circuit-blobs");
     let url = format!("{prefix}/{}", filename.as_ref().to_str().unwrap());
-    mina_core::http::get_bytes(&url).await
+    trace_stage("fetch.get_bytes.begin");
+    let bytes = mina_core::http::get_bytes(&url).await;
+    trace_stage("fetch.get_bytes.complete");
+    bytes
 }
 
 #[cfg(target_family = "wasm")]
