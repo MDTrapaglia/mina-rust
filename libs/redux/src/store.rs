@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
 use crate::{
@@ -39,14 +42,37 @@ impl<T: Clone> Clone for StateWrapper<T> {
 }
 
 /// Monotonic and system time reference points.
+///
+/// On wasm each worker has its own monotonic clock origin, so the reference
+/// point must not be shared across workers.
+#[cfg(not(target_arch = "wasm32"))]
 static INITIAL_TIME: OnceLock<(Instant, SystemTime)> = OnceLock::new();
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static INITIAL_TIME: RefCell<Option<(Instant, SystemTime)>> = const { RefCell::new(None) };
+}
+
+fn initial_time_get_or_init(
+    init: impl FnOnce() -> (Instant, SystemTime),
+) -> (Instant, SystemTime) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        *INITIAL_TIME.get_or_init(init)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        INITIAL_TIME.with_borrow_mut(|slot| *slot.get_or_insert_with(init))
+    }
+}
 
 /// Converts monotonic time to nanoseconds since Unix epoch.
 ///
 /// If `None` passed, returns result for current time.
 pub fn monotonic_to_time(time: Option<Instant>) -> u64 {
-    let (monotonic, system) = INITIAL_TIME.get_or_init(|| (Instant::now(), SystemTime::now()));
-    let time_passed = time.unwrap_or_else(Instant::now).duration_since(*monotonic);
+    let (monotonic, system) = initial_time_get_or_init(|| (Instant::now(), SystemTime::now()));
+    let time_passed = time.unwrap_or_else(Instant::now).duration_since(monotonic);
     system
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|x| x + time_passed)
@@ -99,7 +125,7 @@ where
             .map(|x| x.as_nanos())
             .unwrap_or(0);
 
-        INITIAL_TIME.get_or_init(move || (initial_monotonic_time, initial_time));
+        let _ = initial_time_get_or_init(move || (initial_monotonic_time, initial_time));
 
         Self {
             reducer,
