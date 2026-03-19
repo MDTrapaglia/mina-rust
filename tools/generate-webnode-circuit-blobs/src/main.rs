@@ -42,17 +42,21 @@ fn source_json(network: &str, is_block: bool) -> &'static str {
     }
 }
 
-fn blob_bytes(src_json: &str, verifier_index: &VerifierIndex<Fq>) -> Result<Vec<u8>> {
-    let verifier_index_bytes = verifier_index_to_bytes(verifier_index)
-        .context("serializing verifier index to postcard bytes")?;
+fn blob_bytes_from_payload(src_json: &str, verifier_index_bytes: &[u8]) -> Vec<u8> {
     let src_digest = Sha256::digest(src_json.as_bytes());
-    let verifier_index_digest = Sha256::digest(&verifier_index_bytes);
+    let verifier_index_digest = Sha256::digest(verifier_index_bytes);
 
     let mut blob = Vec::with_capacity(64 + verifier_index_bytes.len());
     blob.extend_from_slice(&src_digest);
     blob.extend_from_slice(&verifier_index_digest);
-    blob.extend_from_slice(&verifier_index_bytes);
-    Ok(blob)
+    blob.extend_from_slice(verifier_index_bytes);
+    blob
+}
+
+fn blob_bytes(src_json: &str, verifier_index: &VerifierIndex<Fq>) -> Result<Vec<u8>> {
+    let verifier_index_bytes = verifier_index_to_bytes(verifier_index)
+        .context("serializing verifier index to postcard bytes")?;
+    Ok(blob_bytes_from_payload(src_json, &verifier_index_bytes))
 }
 
 fn write_blob(path: &Path, src_json: &str, verifier_index: &VerifierIndex<Fq>) -> Result<()> {
@@ -91,4 +95,33 @@ fn main() -> Result<()> {
     println!("{}", block_path.display());
     println!("{}", tx_path.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        blob_bytes_from_payload, source_json, DEVNET_BLOCK_VERIFIER_SRC,
+        DEVNET_TRANSACTION_VERIFIER_SRC, MAINNET_BLOCK_VERIFIER_SRC,
+        MAINNET_TRANSACTION_VERIFIER_SRC,
+    };
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn source_json_selects_expected_embedded_sources() {
+        assert_eq!(source_json("devnet", true), DEVNET_BLOCK_VERIFIER_SRC);
+        assert_eq!(source_json("devnet", false), DEVNET_TRANSACTION_VERIFIER_SRC);
+        assert_eq!(source_json("mainnet", true), MAINNET_BLOCK_VERIFIER_SRC);
+        assert_eq!(source_json("mainnet", false), MAINNET_TRANSACTION_VERIFIER_SRC);
+    }
+
+    #[test]
+    fn blob_bytes_prefixes_source_and_payload_digests() {
+        let src_json = r#"{"kind":"block"}"#;
+        let payload = b"payload-bytes";
+        let blob = blob_bytes_from_payload(src_json, payload);
+
+        assert_eq!(&blob[..32], &Sha256::digest(src_json.as_bytes())[..]);
+        assert_eq!(&blob[32..64], &Sha256::digest(payload)[..]);
+        assert_eq!(&blob[64..], payload);
+    }
 }

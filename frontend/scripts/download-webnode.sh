@@ -2,13 +2,15 @@
 
 set -euo pipefail
 
-MINA_BASE_URL="https://github.com/o1-labs"
-CIRCUITS_BASE_URL="$MINA_BASE_URL/circuit-blobs/releases/download"
+MINA_BASE_URL="${MINA_BASE_URL:-https://github.com/o1-labs}"
+CIRCUITS_BASE_URL="${CIRCUITS_BASE_URL:-$MINA_BASE_URL/circuit-blobs/releases/download}"
 CIRCUITS_VERSION="${CIRCUITS_VERSION:-berkeley-devnet}"
-SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-DOWNLOAD_ROOT="$REPO_ROOT/frontend/src/assets/webnode/circuit-blobs"
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd -- "$SCRIPT_DIR/../.." && pwd)}"
+DOWNLOAD_ROOT="${DOWNLOAD_ROOT:-$REPO_ROOT/frontend/src/assets/webnode/circuit-blobs}"
 DOWNLOAD_DIR="$DOWNLOAD_ROOT/$CIRCUITS_VERSION"
+CURL_BIN="${CURL_BIN:-curl}"
+CARGO_BIN="${CARGO_BIN:-cargo}"
 
 DEVNET_CIRCUIT_FILES=(
     "step-step-proving-key-blockchain-snark-step-0-55f640777b6486a6fd3fdbc3fcffcc60_gates.json"
@@ -45,7 +47,7 @@ GENERATED_VERIFIER_FILES=(
 download_release_asset() {
     local file="$1"
     echo "Downloading $file to $DOWNLOAD_DIR..."
-    curl -fsSL --retry 3 --retry-delay 5 \
+    "$CURL_BIN" -fsSL --retry 3 --retry-delay 5 \
         -o "$DOWNLOAD_DIR/$file" \
         "$CIRCUITS_BASE_URL/$CIRCUITS_VERSION/$file"
     echo "$file downloaded successfully to $DOWNLOAD_DIR"
@@ -77,7 +79,7 @@ generate_verifier_postcards() {
     echo "Generating verifier postcards locally for $network..."
     (
         cd "$REPO_ROOT"
-        cargo run --quiet -p generate-webnode-circuit-blobs -- \
+        "$CARGO_BIN" run --quiet -p generate-webnode-circuit-blobs -- \
             --network "$network" \
             --out-root "$DOWNLOAD_ROOT"
     )

@@ -1,3 +1,10 @@
+fn http_fetch_status_error(url: &str, status: u16) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("http fetch failed for {url} with status {status}"),
+    )
+}
+
 #[cfg(target_family = "wasm")]
 mod http {
     use crate::thread;
@@ -22,10 +29,7 @@ mod http {
         let resp: Response = resp_value.dyn_into().unwrap();
         let status = resp.status();
         if !resp.ok() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("http fetch failed for {url} with status {status}"),
-            ));
+            return Err(super::http_fetch_status_error(&url, status));
         }
         let js = JsFuture::from(resp.array_buffer().map_err(to_io_err)?)
             .await
@@ -54,3 +58,24 @@ mod http {
 
 #[cfg(target_family = "wasm")]
 pub use http::{get_bytes, get_bytes_blocking};
+
+#[cfg(test)]
+mod tests {
+    use super::http_fetch_status_error;
+
+    #[test]
+    fn non_ok_fetch_uses_not_found_error_kind() {
+        let err = http_fetch_status_error("https://example.invalid/missing", 404);
+
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn non_ok_fetch_error_mentions_url_and_status() {
+        let err = http_fetch_status_error("https://example.invalid/missing", 503);
+
+        let message = err.to_string();
+        assert!(message.contains("https://example.invalid/missing"));
+        assert!(message.contains("503"));
+    }
+}

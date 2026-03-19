@@ -61,6 +61,8 @@ impl std::fmt::Display for Kind {
     }
 }
 
+const WASM_HASH_CHUNK_SIZE: usize = 8 * 1024;
+
 fn sha256_digest(slice: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(slice);
@@ -116,13 +118,11 @@ async fn sha256_digest_webcrypto(slice: &[u8]) -> anyhow::Result<[u8; 32]> {
 
 #[cfg(target_family = "wasm")]
 async fn verify_payload_digest(expected: &[u8; 32], slice: &[u8]) -> anyhow::Result<()> {
-    const HASH_CHUNK_SIZE: usize = 8 * 1024;
-
     // Prefer the browser's SHA-256 implementation and keep the chunked Rust
     // hasher as a fallback for environments without `crypto.subtle`.
     let digest = match sha256_digest_webcrypto(slice).await {
         Ok(digest) => digest,
-        Err(_) => sha256_digest_chunked(slice, HASH_CHUNK_SIZE),
+        Err(_) => sha256_digest_chunked(slice, WASM_HASH_CHUNK_SIZE),
     };
     if expected != &digest {
         anyhow::bail!("verifier index digest verification failed");
@@ -549,7 +549,10 @@ pub fn make_zkapp_verifier_index(vk: &VerificationKey) -> VerifierIndex<Fq> {
 
 #[cfg(test)]
 mod tests {
-    use super::{sha256_digest, sha256_digest_chunked};
+    use super::{sha256_digest, sha256_digest_chunked, WASM_HASH_CHUNK_SIZE};
+
+    #[cfg(target_family = "wasm")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
     #[test]
     fn chunked_sha256_matches_full_sha256() {
@@ -560,5 +563,22 @@ mod tests {
             sha256_digest_chunked(&bytes, 8 * 1024)
         );
         assert_eq!(sha256_digest(&bytes), sha256_digest_chunked(&bytes, 31));
+    }
+
+    #[test]
+    fn wasm_hash_chunk_size_contract_is_8k() {
+        assert_eq!(WASM_HASH_CHUNK_SIZE, 8 * 1024);
+    }
+
+    #[cfg(target_family = "wasm")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn webcrypto_sha256_matches_rust_sha256() {
+        let bytes: Vec<u8> = (0..64 * 1024).map(|i| (i % 251) as u8).collect();
+
+        let webcrypto = super::sha256_digest_webcrypto(&bytes)
+            .await
+            .expect("webcrypto sha256 should succeed in browser tests");
+
+        assert_eq!(webcrypto, sha256_digest(&bytes));
     }
 }

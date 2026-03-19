@@ -7,7 +7,7 @@ pub mod log;
 pub mod requests;
 
 // TODO(binier): refactor
-#[cfg(target_family = "wasm")]
+#[cfg(any(target_family = "wasm", test))]
 pub mod http;
 
 pub mod channels;
