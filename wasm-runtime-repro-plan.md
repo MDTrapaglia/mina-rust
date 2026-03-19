@@ -17,9 +17,32 @@ The current conclusion is:
 
 Because of that variability, chunk tuning alone is not an acceptable fix.
 
-## Working hypothesis
+## Confirmed advances to date
 
-The strongest working hypothesis is not "a specific bad chunk offset" and not "a single broken SHA implementation".
+The runtime line already established several facts that were not clear when this branch was created:
+
+- the large-digest instability can reproduce before entering Mina verifier parsing
+- pure JS `crypto.subtle.digest("SHA-256", ...)` inside the same worker can stall on a `Uint8Array` of roughly `3317098` bytes
+- the same JS probe completes reliably at smaller sizes such as `1048576` bytes
+- sizes around `2 MiB`, `2.5 MiB`, and `3 MiB` are not cleanly monotonic: some runs complete and others time out with large timing variance
+- copying bytes into a fresh `Uint8Array` does not remove the issue, so shared wasm memory is not the only plausible ingredient
+- running the probe with `skip_run=1` still reproduces the failure, so the extra `run(...)` worker load is not a necessary condition
+- forcing lower effective concurrency, for example `forced_hardware_concurrency=2`, can improve some runs but does not make the behavior reliable
+- a wasm-side Rust fallback using chunked `sha2` plus cooperative yields changes the behavior materially
+- the best Mina-side variant observed so far is Rust hashing with `16 KiB` chunks and a yield boundary every `64 KiB`
+- that variant can complete `block_verifier_index` payload digest verification and reach `read_cache.decode.begin` in some runs
+- the same variant still fails to do so in other equivalent runs
+
+These results narrow the problem substantially:
+
+- this is no longer well explained as a Mina-only bug
+- this is no longer well explained as a `wasm-bindgen` bridge bug alone
+- this is no longer well explained as "a single bad payload offset"
+- the remaining problem is strongly consistent with browser-worker runtime variability under large hashing work
+
+## Refined hypotheses
+
+The strongest working hypothesis is still not "a specific bad chunk offset" and not "a single broken SHA implementation".
 
 The evidence currently fits a runtime interaction involving:
 
@@ -27,6 +50,44 @@ The evidence currently fits a runtime interaction involving:
 - shared memory / multithreaded wasm runtime behavior
 - long-running CPU work inside a worker
 - Chromium headless nondeterminism under load
+- browser task scheduling around large async crypto work
+
+The leading hypotheses are now:
+
+### H1. Worker scheduling sensitivity is primary
+
+The outcome changes materially when long work is segmented differently:
+
+- one-shot `WebCrypto` can stall
+- Rust chunked hashing can progress further
+- adding cooperative yields can help
+- `16 KiB` chunks outperform larger chunks in the current Mina path
+
+This suggests that scheduler granularity and worker responsiveness are part of the causal chain, even if they are not the whole explanation.
+
+### H2. Shared memory is aggravating, not strictly required
+
+The issue reproducing with a copied JS buffer means shared wasm memory is not required.
+
+Shared memory may still worsen timing or contention once Mina runs, but it is no longer a sufficient root-cause explanation by itself.
+
+### H3. Contention changes probability, not necessity
+
+Lower effective concurrency sometimes improves completion time, but:
+
+- failure still occurs with `skip_run=1`
+- failure still occurs with reduced apparent concurrency
+
+So extra workers and contention matter, but they do not appear to be necessary preconditions.
+
+### H4. Headless Chromium runtime behavior is now a first-class suspect
+
+Because the failure reproduces in pure JS `WebCrypto` inside the same worker environment, a browser/runtime issue is now a stronger explanation than a Mina-specific logic error.
+
+This still needs one more step of confirmation:
+
+- determine whether the same minimal probe behaves differently in non-headless Chromium or another browser
+- determine whether the repro persists with a wasm-only harness that does not import Mina code at all
 
 Chunk size matters because it changes the shape of the work:
 
@@ -35,6 +96,17 @@ Chunk size matters because it changes the shape of the work:
 - yielding inserts scheduler boundaries that can help or hurt depending on timing
 
 So chunk size is influencing runtime behavior, but no result so far proves that chunk size is the root cause.
+
+## What is already ruled out
+
+At the current confidence level, this branch should treat the following explanations as insufficient or already weakened:
+
+- "the issue is only inside Mina verifier decoding"
+- "the issue only happens after `run(...)` starts extra runtime work"
+- "the issue requires wasm memory-backed input"
+- "there is one deterministic failing chunk offset in the postcard payload"
+- "switching from `sha2` to `WebCrypto` alone fixes the problem"
+- "a smaller chunk size fully removes the failure mode"
 
 ## Investigation goals
 
@@ -54,6 +126,11 @@ So chunk size is influencing runtime behavior, but no result so far proves that 
    - Mina-specific
    - wasm-bindgen bridge specific
    - Chromium worker/runtime specific
+
+5. Produce a repro and evidence quality high enough to justify one of:
+   - an upstream Chromium / wasm runtime issue
+   - a product guardrail in Mina wasm
+   - both
 
 ## Non-goals
 
@@ -109,6 +186,13 @@ Run and record a matrix across:
   - single worker repro only
   - with the existing extra worker/runtime load
 
+Status:
+
+- partially complete
+- pure JS `WebCrypto` probe exists in the local harness
+- size sweep and basic concurrency sweep were already exercised
+- Rust-only minimal repro outside Mina code is still missing
+
 Each row should record:
 
 - completed or timed out
@@ -146,6 +230,12 @@ Exit criteria:
 - either the failure still reproduces without Mina verifier loading
 - or it disappears, in which case Mina-side logic becomes suspect again
 
+Status:
+
+- partially complete
+- JS-only worker probe already reproduces the failure without entering verifier parsing
+- a stricter repro that does not load Mina wasm at all is still pending
+
 ### Phase 2. Separate backend from scheduler
 
 If the minimal repro still fails, compare:
@@ -163,6 +253,15 @@ Exit criteria:
 
 - identify at least one pair of runs where changing only backend or yield strategy changes the outcome materially
 
+Status:
+
+- partially complete
+- outcome already changes materially between:
+  - JS `WebCrypto`
+  - Rust chunked hashing
+  - Rust chunked hashing plus yield
+- missing piece: a minimal Rust-only wasm repro outside Mina crates
+
 ### Phase 3. Shared-memory sensitivity
 
 Repeat the minimal repro with:
@@ -178,6 +277,13 @@ Goal:
 Exit criteria:
 
 - confirm or reject "shared memory is required to reproduce"
+
+Status:
+
+- partially complete
+- copied JS buffer still reproduces the issue
+- this is strong evidence against shared memory being required
+- still missing: a minimal wasm-side copy-vs-shared comparison outside Mina
 
 ### Phase 4. Concurrency sensitivity
 
@@ -195,6 +301,13 @@ Exit criteria:
 
 - confirm whether single-worker repro is sufficient
 
+Status:
+
+- partially complete
+- `skip_run=1` indicates the extra Mina worker path is not necessary
+- reduced effective concurrency can help but does not eliminate failures
+- still missing: a completely isolated one-worker repro with no Mina runtime loaded
+
 ### Phase 5. Product decision
 
 Only after the runtime line is understood enough, choose one of:
@@ -203,6 +316,11 @@ Only after the runtime line is understood enough, choose one of:
 - bypass expensive digest verification for packaged assets under strict assumptions
 - move verifier-cache verification off the critical startup path
 - report a Chromium/wasm issue with a minimal external repro
+
+This phase should not start until the branch can answer two questions cleanly:
+
+- does a minimal wasm worker repro fail without Mina code
+- is the failure materially different between headless and non-headless Chromium
 
 ## Success criteria
 
@@ -222,3 +340,25 @@ The evidence today supports this statement:
 - no chunk size tested so far removes the failure mode with enough confidence to rely on it operationally
 
 That is the reason for splitting this work into a dedicated runtime-repro branch.
+
+## Immediate next steps
+
+1. Add a minimal wasm worker module under the local smoke harness that exports hashing helpers but does not load Mina node logic.
+2. Re-run the existing JS probe and the new wasm-only probe with the same payload sizes:
+   - `1 MiB`
+   - `2 MiB`
+   - `3 MiB`
+   - `3317098` bytes
+3. Compare three backends in the same harness:
+   - JS `WebCrypto`
+   - wasm `sha2` one shot
+   - wasm `sha2` chunked plus yield
+4. Record each configuration across at least 3 runs and classify it as:
+   - reliable
+   - variable
+   - failing
+5. If the minimal wasm-only probe still reproduces the instability, prepare a compact upstream-quality report with:
+   - exact browser mode
+   - payload sizes
+   - completion variability
+   - headless vs non-headless notes
