@@ -43,6 +43,7 @@
       const wasmProfile = params.get("wasm_profile") ?? "threaded";
       const inputMode = params.get("input_mode") ?? "js_copy";
       const esmTarget = params.get("esm_target") ?? "trivial";
+      const workerEntry = params.get("worker_entry") ?? "dynamic";
       const pageImportProbe = params.get("page_import_probe") ?? "none";
       const skipWorker = params.get("skip_worker") === "1";
       const sizeBytes = positiveInt("size_bytes", 3317098);
@@ -64,6 +65,7 @@
           wasmProfile,
           inputMode,
           esmTarget,
+          workerEntry,
           pageImportProbe,
           skipWorker,
           sizeBytes,
@@ -90,6 +92,19 @@
           return "/tools/wasm-runtime-repro/probe-module.js";
         }
         throw new Error(`unsupported import target: ${target}`);
+      };
+
+      const workerEntryRoot = entry => {
+        if (entry === "dynamic") {
+          return "/tools/wasm-runtime-repro/runtime-worker.js";
+        }
+        if (entry === "static_trivial") {
+          return "/tools/wasm-runtime-repro/runtime-worker-static-trivial.js";
+        }
+        if (entry === "static_single") {
+          return "/tools/wasm-runtime-repro/runtime-worker-static-single.js";
+        }
+        throw new Error(`unsupported worker entry: ${entry}`);
       };
 
       const flush = () => {
@@ -152,14 +167,12 @@
           return;
         }
 
-        const workerUrl = new URL(
-          "/tools/wasm-runtime-repro/runtime-worker.js",
-          window.location.origin,
-        );
+        const workerUrl = new URL(workerEntryRoot(workerEntry), window.location.origin);
         workerUrl.searchParams.set("backend", backend);
         workerUrl.searchParams.set("wasm_profile", wasmProfile);
         workerUrl.searchParams.set("input_mode", inputMode);
         workerUrl.searchParams.set("esm_target", esmTarget);
+        workerUrl.searchParams.set("worker_entry", workerEntry);
         workerUrl.searchParams.set("size_bytes", String(sizeBytes));
         workerUrl.searchParams.set("chunk_size", String(chunkSize));
         workerUrl.searchParams.set(
@@ -198,6 +211,7 @@
             });
           });
         });
+        worker.postMessage({ type: "start" });
 
         const startedAt = performance.now();
         const timeoutToken = Symbol("timeout");

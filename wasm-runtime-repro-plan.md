@@ -702,3 +702,99 @@ If static imports work and dynamic imports do not, the issue narrows to the dyna
 2. Compare static-import worker behavior against the current dynamic-import worker behavior.
 3. If static imports succeed, minimize further around `await import(...)` in workers and prepare an upstream Chromium-style repro.
 4. If static imports also fail, test the same minimal harness outside headless mode or in another browser to separate “Chromium headless” from “worker module loader” more cleanly.
+
+## Result F. Static worker imports resolve, dynamic worker imports still hang after removing the listener race
+
+After Result E, the harness was refined in two ways:
+
+1. The page now sends an explicit `{ type: "start" }` message after installing worker listeners.
+2. The workers wait for that start message before posting completion, removing the possibility that a very fast worker could beat the page-side listener setup.
+
+Additional worker entrypoints were added:
+
+- `tools/wasm-runtime-repro/runtime-worker-static-trivial.js`
+- `tools/wasm-runtime-repro/runtime-worker-static-single.js`
+
+These entrypoints use static top-level imports instead of `await import(...)`.
+
+Observed artifacts:
+
+- dynamic worker, trivial target:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-browser-worker-dynamic-trivial-v4.html`
+- dynamic worker, single target:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-browser-worker-dynamic-single-v4.html`
+- static worker, trivial target:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-browser-worker-static-trivial-v1.html`
+- static worker, single target:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-browser-worker-static-single-v1.html`
+- shared server trace:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-server-8153-v1.log`
+
+Observed behavior after the handshake fix:
+
+- `worker_entry=static_trivial` resolved
+- `worker_entry=static_single` resolved
+- `worker_entry=dynamic&backend=esm_import_only&esm_target=trivial` timed out
+- `worker_entry=dynamic&backend=esm_import_only&esm_target=single` timed out
+
+Most importantly:
+
+- static worker imports reached `runtime-worker:static.import.complete`
+- dynamic worker imports reached `runtime-worker:esm.import.begin`
+- dynamic worker imports did not reach `runtime-worker:esm.import.complete`
+
+That means the old “maybe the page missed a very fast worker message” explanation is no longer enough to explain the active failure. Once the start-race is removed, the split remains:
+
+- static imports in workers: healthy
+- dynamic `await import(...)` in workers: hanging
+
+## What changed in the interpretation after Result F
+
+This is the strongest separation produced by the minimal repro so far.
+
+It narrows the active runtime issue to:
+
+- dynamic nested ESM import from inside a module worker under headless Chromium
+
+and simultaneously weakens several broader theories:
+
+- not “workers cannot import modules”
+- not “all nested worker imports fail”
+- not “wasm-bindgen package loading always fails in workers”
+- not “the page-side listener race fully explained the earlier timeouts”
+
+## New working hypotheses after Result F
+
+### H13. The dominant repro is specific to dynamic `import()` inside a module worker
+
+Because both static workers succeed and both dynamic workers hang, the minimal runtime bug is now best described as:
+
+- “`await import(...)` inside a module worker can hang in this Chromium headless runtime, even when the same target loads via static import”
+
+### H14. The issue is now small enough for an upstream-quality repro
+
+The current harness no longer needs wasm hashing or Mina logic to reproduce the active frontier.
+
+The smallest meaningful variants are now:
+
+- dynamic worker import of `probe-module.js` -> hangs
+- static worker import of `probe-module.js` -> resolves
+
+That is a much cleaner upstream repro than anything we had before.
+
+## Revised next steps after Result F
+
+1. Extract the static-vs-dynamic worker import comparison into an even smaller standalone repro, ideally with:
+   - one HTML file
+   - one worker with dynamic import
+   - one worker with static import
+   - one trivial imported module
+2. Run that tiny repro in:
+   - Chromium headless
+   - a regular browser session if available
+   - optionally Firefox for contrast
+3. If the split persists, prepare an upstream issue centered on:
+   - worker module
+   - dynamic import
+   - headless Chromium
+   - trivial ESM target

@@ -264,14 +264,22 @@ self.addEventListener("unhandledrejection", event => {
   });
 });
 
-runProbe().catch(error => {
-  const message = {
-    type: "error",
-    backend,
-    inputMode,
-    message: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack ?? null : null,
-  };
-  trace("error", message);
-  self.postMessage(message);
+let started = false;
+
+self.addEventListener("message", event => {
+  if (started || event.data?.type !== "start") {
+    return;
+  }
+  started = true;
+  runProbe().catch(error => {
+    const message = {
+      type: "error",
+      backend,
+      inputMode,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack ?? null : null,
+    };
+    trace("error", message);
+    self.postMessage(message);
+  });
 });
