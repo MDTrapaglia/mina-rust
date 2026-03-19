@@ -39,7 +39,7 @@ por fix. Cada ficha ahora incluye:
 | 14  | [14-move-payload-validation-out-of-critical-bootstrap-path.md](./14-move-payload-validation-out-of-critical-bootstrap-path.md) | mitigación       | propuesto                   | -                        |
 | 15  | [15-firefox-smoke-to-isolate-browser-specific-pathology.md](./15-firefox-smoke-to-isolate-browser-specific-pathology.md)       | diagnóstico      | validado                    | -                        |
 | 16  | [16-firefox-target-keep-vs-optional.md](./16-firefox-target-keep-vs-optional.md)                                               | nota de decisión | derivado de evidencia nueva | -                        |
-| 17  | [17-force-explicit-worker-shim-for-firefox-smoke-bringup.md](./17-force-explicit-worker-shim-for-firefox-smoke-bringup.md)     | diagnóstico      | implementado                | -                        |
+| 17  | [17-force-explicit-worker-shim-for-firefox-smoke-bringup.md](./17-force-explicit-worker-shim-for-firefox-smoke-bringup.md)     | diagnóstico      | implementado                | `757dba46a`              |
 
 ## Notas
 

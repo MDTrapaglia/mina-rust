@@ -4,7 +4,7 @@ Fuente: seguimiento posterior a `Fix 15`
 
 Clasificación: `diagnóstico`
 Estado real: `implementado`
-Branch: `codex/wasm-known-fixes`
+Branch / commit: `codex/wasm-known-fixes`, `757dba46a`
 
 ## Archivos
 
