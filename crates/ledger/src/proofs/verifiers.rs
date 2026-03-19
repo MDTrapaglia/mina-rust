@@ -57,6 +57,41 @@ impl std::fmt::Display for Kind {
     }
 }
 
+fn sha256_digest(slice: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(slice);
+    hasher.finalize().into()
+}
+
+fn sha256_digest_chunked(slice: &[u8], chunk_size: usize) -> [u8; 32] {
+    assert!(chunk_size > 0);
+    let mut hasher = Sha256::new();
+    for chunk in slice.chunks(chunk_size) {
+        hasher.update(chunk);
+    }
+    hasher.finalize().into()
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn verify_payload_digest(expected: &[u8; 32], slice: &[u8]) -> anyhow::Result<()> {
+    let digest = sha256_digest(slice);
+    if expected != &digest {
+        anyhow::bail!("verifier index digest verification failed");
+    }
+    Ok(())
+}
+
+#[cfg(target_family = "wasm")]
+async fn verify_payload_digest(expected: &[u8; 32], slice: &[u8]) -> anyhow::Result<()> {
+    const HASH_CHUNK_SIZE: usize = 8 * 1024;
+
+    let digest = sha256_digest_chunked(slice, HASH_CHUNK_SIZE);
+    if expected != &digest {
+        anyhow::bail!("verifier index digest verification failed");
+    }
+    Ok(())
+}
+
 fn cache_filename(kind: Kind) -> PathBuf {
     let circuits_config = mina_core::NetworkConfig::global().circuits_config;
     Path::new(circuits_config.directory_name).join(kind.filename())
@@ -87,12 +122,10 @@ macro_rules! read_cache {
         // index digest
         slice.read_exact(&mut d).context("reading index digest")?;
 
-        let mut hasher = Sha256::new();
-        hasher.update(slice);
-        let digest = hasher.finalize();
-        if d != digest.as_slice() {
-            anyhow::bail!("verifier index digest verification failed");
-        }
+        #[cfg(not(target_family = "wasm"))]
+        verify_payload_digest(&d, slice)?;
+        #[cfg(target_family = "wasm")]
+        verify_payload_digest(&d, slice).await?;
         Ok(super::caching::verifier_index_from_bytes(slice)?)
     }};
 }
@@ -473,5 +506,21 @@ pub fn make_zkapp_verifier_index(vk: &VerificationKey) -> VerifierIndex<Fq> {
         linearization,
         powers_of_alpha,
         zk_rows,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sha256_digest, sha256_digest_chunked};
+
+    #[test]
+    fn chunked_sha256_matches_full_sha256() {
+        let bytes: Vec<u8> = (0..200_000).map(|i| (i % 251) as u8).collect();
+
+        assert_eq!(
+            sha256_digest(&bytes),
+            sha256_digest_chunked(&bytes, 8 * 1024)
+        );
+        assert_eq!(sha256_digest(&bytes), sha256_digest_chunked(&bytes, 31));
     }
 }
