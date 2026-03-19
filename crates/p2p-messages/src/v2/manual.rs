@@ -1697,6 +1697,10 @@ impl std::fmt::Debug for UnsignedExtendedUInt64Int64ForVersionTagsStableV1 {
 }
 
 impl MinaBaseProtocolConstantsCheckedValueStableV1 {
+    pub fn default_grace_period_slots() -> UnsignedExtendedUInt32StableV1 {
+        Self::default_constants().grace_period_slots
+    }
+
     const fn default_constants() -> Self {
         const fn from_u32(v: u32) -> UnsignedExtendedUInt32StableV1 {
             UnsignedExtendedUInt32StableV1(Number(v))

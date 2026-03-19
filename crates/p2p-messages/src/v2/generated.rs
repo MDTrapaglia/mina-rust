@@ -201,6 +201,7 @@ pub struct ConsensusProofOfStakeDataConsensusStateValueStableV2 {
     pub sub_window_densities: List<UnsignedExtendedUInt32StableV1>,
     pub last_vrf_output: ConsensusVrfOutputTruncatedStableV1,
     pub total_currency: CurrencyAmountStableV1,
+    #[serde(alias = "curr_global_slot")]
     pub curr_global_slot_since_hard_fork: ConsensusGlobalSlotStableV1,
     pub global_slot_since_genesis: MinaNumbersGlobalSlotSinceGenesisMStableV1,
     pub staking_epoch_data: ConsensusProofOfStakeDataEpochDataStakingValueVersionedValueStableV1,
@@ -2773,6 +2774,7 @@ pub struct MinaBaseProtocolConstantsCheckedValueStableV1 {
     pub k: UnsignedExtendedUInt32StableV1,
     pub slots_per_epoch: UnsignedExtendedUInt32StableV1,
     pub slots_per_sub_window: UnsignedExtendedUInt32StableV1,
+    #[serde(default = "MinaBaseProtocolConstantsCheckedValueStableV1::default_grace_period_slots")]
     pub grace_period_slots: UnsignedExtendedUInt32StableV1,
     pub delta: UnsignedExtendedUInt32StableV1,
     pub genesis_state_timestamp: BlockTimeTimeStableV1,
