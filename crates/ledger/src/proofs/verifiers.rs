@@ -5,10 +5,14 @@ use std::{
 };
 
 use anyhow::Context;
+#[cfg(target_family = "wasm")]
+use js_sys::Uint8Array;
 use mina_core::{info, log::system_time, warn};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[cfg(target_family = "wasm")]
+use wasm_bindgen::prelude::*;
 
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use kimchi::{
@@ -82,10 +86,44 @@ fn verify_payload_digest(expected: &[u8; 32], slice: &[u8]) -> anyhow::Result<()
 }
 
 #[cfg(target_family = "wasm")]
+#[wasm_bindgen(inline_js = r#"
+export async function codex_sha256_webcrypto(bytes) {
+  if (!self.crypto || !self.crypto.subtle) {
+    throw new Error('crypto.subtle unavailable');
+  }
+  const digest = await self.crypto.subtle.digest('SHA-256', Uint8Array.from(bytes));
+  return new Uint8Array(digest);
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    async fn codex_sha256_webcrypto(bytes: Box<[u8]>) -> Result<Uint8Array, JsValue>;
+}
+
+#[cfg(target_family = "wasm")]
+async fn sha256_digest_webcrypto(slice: &[u8]) -> anyhow::Result<[u8; 32]> {
+    let digest = codex_sha256_webcrypto(slice.to_vec().into_boxed_slice())
+        .await
+        .map_err(|err| anyhow::anyhow!("{err:?}"))?;
+    if digest.length() != 32 {
+        anyhow::bail!("unexpected webcrypto digest length {}", digest.length());
+    }
+
+    let mut bytes = [0u8; 32];
+    digest.copy_to(&mut bytes);
+    Ok(bytes)
+}
+
+#[cfg(target_family = "wasm")]
 async fn verify_payload_digest(expected: &[u8; 32], slice: &[u8]) -> anyhow::Result<()> {
     const HASH_CHUNK_SIZE: usize = 8 * 1024;
 
-    let digest = sha256_digest_chunked(slice, HASH_CHUNK_SIZE);
+    // Prefer the browser's SHA-256 implementation and keep the chunked Rust
+    // hasher as a fallback for environments without `crypto.subtle`.
+    let digest = match sha256_digest_webcrypto(slice).await {
+        Ok(digest) => digest,
+        Err(_) => sha256_digest_chunked(slice, HASH_CHUNK_SIZE),
+    };
     if expected != &digest {
         anyhow::bail!("verifier index digest verification failed");
     }

@@ -3206,17 +3206,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "generic-array"
-version = "0.14.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
-dependencies = [
- "typenum",
- "version_check",
- "zeroize",
-]
-
-[[package]]
 name = "generate-webnode-circuit-blobs"
 version = "0.19.0"
 dependencies = [
@@ -3226,6 +3215,17 @@ dependencies = [
  "mina-curves",
  "mina-tree",
  "sha2 0.10.8",
+]
+
+[[package]]
+name = "generic-array"
+version = "0.14.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
+dependencies = [
+ "typenum",
+ "version_check",
+ "zeroize",
 ]
 
 [[package]]
@@ -5666,6 +5666,7 @@ dependencies = [
  "getrandom",
  "hex",
  "itertools 0.12.1",
+ "js-sys",
  "juniper",
  "kimchi",
  "lazy_static",
