@@ -21,23 +21,24 @@ por fix. Cada ficha ahora incluye:
 
 ## Índice
 
-| # | Archivo | Tipo | Estado real | Commit |
-| --- | --- | --- | --- | --- |
-| 01 | [01-monotonic-time-per-worker.md](./01-monotonic-time-per-worker.md) | fix real | implementado | `6ef07ca9e` |
-| 02 | [02-document-no-cross-worker-monotonic-reference.md](./02-document-no-cross-worker-monotonic-reference.md) | hardening | parcial | `6ef07ca9e` |
-| 03 | [03-validate-resp-ok-in-wasm-fetch.md](./03-validate-resp-ok-in-wasm-fetch.md) | fix real | implementado | `fbad99a22` |
-| 04 | [04-trace-http-response-status.md](./04-trace-http-response-status.md) | diagnóstico | no implementado | - |
-| 05 | [05-generate-missing-postcard-assets.md](./05-generate-missing-postcard-assets.md) | fix real | implementado | `4f98d3342`, `e5e03d93c` |
-| 06 | [06-fix-download-webnode-script-asset-assumptions.md](./06-fix-download-webnode-script-asset-assumptions.md) | hardening | implementado | `e5e03d93c` |
-| 07 | [07-fail-fast-when-postcard-asset-is-missing.md](./07-fail-fast-when-postcard-asset-is-missing.md) | hardening | parcial | `fbad99a22`, `e5e03d93c` |
-| 08 | [08-remove-sync-xhr-tracing-in-workers.md](./08-remove-sync-xhr-tracing-in-workers.md) | diagnóstico | no aplica al branch | - |
-| 09 | [09-keep-wasm-tracing-non-blocking.md](./09-keep-wasm-tracing-non-blocking.md) | diagnóstico | no aplica al branch | - |
-| 10 | [10-chunked-sha256-payload-hashing.md](./10-chunked-sha256-payload-hashing.md) | mitigación | implementado | `698265fdb` |
-| 11 | [11-wasm-specific-small-hash-chunk-size.md](./11-wasm-specific-small-hash-chunk-size.md) | mitigación | implementado | `698265fdb` |
-| 12 | [12-webcrypto-sha256-for-wasm.md](./12-webcrypto-sha256-for-wasm.md) | fix real | implementado | `3e7db1033` |
-| 13 | [13-avoid-rehashing-large-payloads-during-bootstrap.md](./13-avoid-rehashing-large-payloads-during-bootstrap.md) | mitigación | propuesto | - |
-| 14 | [14-move-payload-validation-out-of-critical-bootstrap-path.md](./14-move-payload-validation-out-of-critical-bootstrap-path.md) | mitigación | propuesto | - |
-| 15 | [15-firefox-smoke-to-isolate-browser-specific-pathology.md](./15-firefox-smoke-to-isolate-browser-specific-pathology.md) | diagnóstico | propuesto | - |
+| #   | Archivo                                                                                                                        | Tipo             | Estado real                 | Commit                   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------- | --------------------------- | ------------------------ |
+| 01  | [01-monotonic-time-per-worker.md](./01-monotonic-time-per-worker.md)                                                           | fix real         | implementado                | `6ef07ca9e`              |
+| 02  | [02-document-no-cross-worker-monotonic-reference.md](./02-document-no-cross-worker-monotonic-reference.md)                     | hardening        | parcial                     | `6ef07ca9e`              |
+| 03  | [03-validate-resp-ok-in-wasm-fetch.md](./03-validate-resp-ok-in-wasm-fetch.md)                                                 | fix real         | implementado                | `fbad99a22`              |
+| 04  | [04-trace-http-response-status.md](./04-trace-http-response-status.md)                                                         | diagnóstico      | no implementado             | -                        |
+| 05  | [05-generate-missing-postcard-assets.md](./05-generate-missing-postcard-assets.md)                                             | fix real         | implementado                | `4f98d3342`, `e5e03d93c` |
+| 06  | [06-fix-download-webnode-script-asset-assumptions.md](./06-fix-download-webnode-script-asset-assumptions.md)                   | hardening        | implementado                | `e5e03d93c`              |
+| 07  | [07-fail-fast-when-postcard-asset-is-missing.md](./07-fail-fast-when-postcard-asset-is-missing.md)                             | hardening        | parcial                     | `fbad99a22`, `e5e03d93c` |
+| 08  | [08-remove-sync-xhr-tracing-in-workers.md](./08-remove-sync-xhr-tracing-in-workers.md)                                         | diagnóstico      | no aplica al branch         | -                        |
+| 09  | [09-keep-wasm-tracing-non-blocking.md](./09-keep-wasm-tracing-non-blocking.md)                                                 | diagnóstico      | no aplica al branch         | -                        |
+| 10  | [10-chunked-sha256-payload-hashing.md](./10-chunked-sha256-payload-hashing.md)                                                 | mitigación       | implementado                | `698265fdb`              |
+| 11  | [11-wasm-specific-small-hash-chunk-size.md](./11-wasm-specific-small-hash-chunk-size.md)                                       | mitigación       | implementado                | `698265fdb`              |
+| 12  | [12-webcrypto-sha256-for-wasm.md](./12-webcrypto-sha256-for-wasm.md)                                                           | fix real         | implementado                | `3e7db1033`              |
+| 13  | [13-avoid-rehashing-large-payloads-during-bootstrap.md](./13-avoid-rehashing-large-payloads-during-bootstrap.md)               | mitigación       | propuesto                   | -                        |
+| 14  | [14-move-payload-validation-out-of-critical-bootstrap-path.md](./14-move-payload-validation-out-of-critical-bootstrap-path.md) | mitigación       | propuesto                   | -                        |
+| 15  | [15-firefox-smoke-to-isolate-browser-specific-pathology.md](./15-firefox-smoke-to-isolate-browser-specific-pathology.md)       | diagnóstico      | propuesto                   | -                        |
+| 16  | [16-firefox-target-keep-vs-optional.md](./16-firefox-target-keep-vs-optional.md)                                               | nota de decisión | derivado de evidencia nueva | -                        |
 
 ## Notas
 
@@ -46,17 +47,19 @@ por fix. Cada ficha ahora incluye:
 - `04`, `08`, `09` y `15` son principalmente de observabilidad/diagnóstico.
 - `13` y `14` siguen siendo decisiones de producto/arquitectura, no cambios
   cerrados de implementación.
+- `16` no introduce un fix nuevo: documenta qué subset seguiría siendo necesario
+  si el runtime objetivo fuera Firefox.
 
 ## Validación ejecutada
 
 Corridas ejecutadas sobre `codex/wasm-known-fixes` en
 `/home/mtrapaglia/mina/mina-rust-known-fixes`:
 
-| Comando | Resultado | Tests | Pass | Fail |
-| --- | --- | --- | --- | --- |
-| `cargo test -p redux --lib` | ok | `0` | `n/a` | `n/a` |
-| `cargo test -p mina-core --lib` | con fallas | `7` | `5` (`71.4%`) | `2` (`28.6%`) |
-| `cargo test -p mina-tree chunked_sha256_matches_full_sha256 --lib` | ok | `1` | `1` (`100%`) | `0` (`0%`) |
+| Comando                                                            | Resultado  | Tests | Pass          | Fail          |
+| ------------------------------------------------------------------ | ---------- | ----- | ------------- | ------------- |
+| `cargo test -p redux --lib`                                        | ok         | `0`   | `n/a`         | `n/a`         |
+| `cargo test -p mina-core --lib`                                    | con fallas | `7`   | `5` (`71.4%`) | `2` (`28.6%`) |
+| `cargo test -p mina-tree chunked_sha256_matches_full_sha256 --lib` | ok         | `1`   | `1` (`100%`)  | `0` (`0%`)    |
 
 Resumen agregado de tests efectivamente ejecutados con casos:
 
@@ -69,8 +72,7 @@ Notas de interpretación:
 - `redux` compiló y ejecutó su target de tests, pero no contiene casos en
   `--lib`, por eso no entra en el porcentaje agregado.
 - las 2 fallas observadas quedaron en `mina-core`:
-  `consensus::tests::long_range_fork` y
-  `consensus::tests::short_range_fork`
+  `consensus::tests::long_range_fork` y `consensus::tests::short_range_fork`
 - no se ejecutó la suite completa del workspace
 - `make build-wasm` se inició para validar el camino wasm/browser, pero la
   corrida fue interrumpida antes del resultado final y no entra en estos
