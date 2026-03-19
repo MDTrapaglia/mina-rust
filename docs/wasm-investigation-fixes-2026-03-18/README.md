@@ -37,18 +37,22 @@ por fix. Cada ficha ahora incluye:
 | 12  | [12-webcrypto-sha256-for-wasm.md](./12-webcrypto-sha256-for-wasm.md)                                                           | fix real         | implementado                | `3e7db1033`              |
 | 13  | [13-avoid-rehashing-large-payloads-during-bootstrap.md](./13-avoid-rehashing-large-payloads-during-bootstrap.md)               | mitigación       | propuesto                   | -                        |
 | 14  | [14-move-payload-validation-out-of-critical-bootstrap-path.md](./14-move-payload-validation-out-of-critical-bootstrap-path.md) | mitigación       | propuesto                   | -                        |
-| 15  | [15-firefox-smoke-to-isolate-browser-specific-pathology.md](./15-firefox-smoke-to-isolate-browser-specific-pathology.md)       | diagnóstico      | propuesto                   | -                        |
+| 15  | [15-firefox-smoke-to-isolate-browser-specific-pathology.md](./15-firefox-smoke-to-isolate-browser-specific-pathology.md)       | diagnóstico      | validado                    | -                        |
 | 16  | [16-firefox-target-keep-vs-optional.md](./16-firefox-target-keep-vs-optional.md)                                               | nota de decisión | derivado de evidencia nueva | -                        |
+| 17  | [17-force-explicit-worker-shim-for-firefox-smoke-bringup.md](./17-force-explicit-worker-shim-for-firefox-smoke-bringup.md)     | diagnóstico      | implementado                | -                        |
 
 ## Notas
 
 - Los commits referencian `codex/wasm-known-fixes` en
   `/home/mtrapaglia/mina/mina-rust-known-fixes`.
-- `04`, `08`, `09` y `15` son principalmente de observabilidad/diagnóstico.
+- `04`, `08`, `09`, `15` y `17` son principalmente de observabilidad/diagnóstico.
 - `13` y `14` siguen siendo decisiones de producto/arquitectura, no cambios
   cerrados de implementación.
 - `16` no introduce un fix nuevo: documenta qué subset seguiría siendo necesario
   si el runtime objetivo fuera Firefox.
+- `17` no cambia el runtime general del producto: fuerza el worker shim sólo
+  dentro del harness `"/wasm-smoke/"` para hacer observable y reproducible el
+  bring-up Firefox.
 
 ## Validación ejecutada
 
@@ -74,6 +78,7 @@ Notas de interpretación:
 - las 2 fallas observadas quedaron en `mina-core`:
   `consensus::tests::long_range_fork` y `consensus::tests::short_range_fork`
 - no se ejecutó la suite completa del workspace
-- `make build-wasm` se inició para validar el camino wasm/browser, pero la
-  corrida fue interrumpida antes del resultado final y no entra en estos
-  porcentajes
+- validación adicional wasm/browser:
+  - `PROTOC=/tmp/protoc-34/bin/protoc make build-wasm`: `ok`
+  - Firefox headless smoke `run(null, [], [], null)`: `resolved`
+  - repetición Firefox headless: `5/5` `resolved`, `0/5` `timeout`
