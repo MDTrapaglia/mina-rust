@@ -494,3 +494,111 @@ That comparison remains a high-priority missing piece.
    - minimal threaded wasm
    - minimal single-threaded wasm
 5. Only after the minimal wasm init path is trustworthy, return to the large-digest backend comparison.
+
+## Update 2026-03-19: real single-threaded build and new split point
+
+### Result C. A true single-threaded package now exists
+
+The runtime-repro harness now has two wasm package variants:
+
+- `tools/wasm-runtime-repro/pkg`
+  - threaded/shared-memory build aligned with the repo's wasm profile
+- `tools/wasm-runtime-repro/pkg-single`
+  - built from a temporary standalone crate outside the repo's `.cargo/config.toml`
+  - no shared-memory `WebAssembly.Memory` creation in generated JS
+  - generated glue only calls `wasm.__wbindgen_start()`
+
+Important implementation detail:
+
+- trying to neutralize the threaded profile from inside the workspace was not enough
+- both `--config ... rustflags=[]` and `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS=''` still inherited the repo's threaded linker flags when Cargo ran with the repo worktree as current directory
+- the working solution was to generate a tiny standalone crate in `/tmp`, `cd` into that directory, compile there, and copy the resulting `pkg-single` back into the harness
+
+This means the single-threaded comparison is now real, not a fake variant still contaminated by shared-memory linker args.
+
+### Result D. Single-threaded worker no longer stalls at `wasm.init(shared)`, but hangs even earlier
+
+Headless Chromium run:
+
+- backend: `wasm_chunked_yielding`
+- `wasm_profile=single`
+- input mode: `js_copy`
+- size: `3317098` bytes
+- chunk size: `16384`
+- yield every `4` chunks
+- timeout budget: `60000 ms`
+
+Observed result:
+
+- `run.state = timeout`
+- no JS-visible errors
+- server traces reached:
+  - `runtime-worker:start`
+  - `runtime-worker:wasm.bindings.import.begin`
+  - fetch of `pkg-single/wasm_runtime_repro.js`
+- traces did not reach:
+  - `runtime-worker:wasm.bindings.import.complete`
+  - `runtime-worker:wasm.init.begin`
+  - `runtime-worker:wasm.init.complete`
+  - any Rust-side hashing marker
+
+In the latest run, the worker did not even reach the `import()` completion for the single-threaded package. Earlier single-profile runs fetched the snippet file as well, but the last traced run still timed out before `import.complete`.
+
+### What changed in the interpretation
+
+The comparison is now cleaner:
+
+1. The threaded minimal wasm variant still stalls after creating shared memory and before `wasm.init.complete`.
+2. The true single-threaded variant does not reproduce that exact stall. Instead, it currently hangs at dynamic module import of `pkg-single`.
+
+So the minimal runtime repro has already disproven one simplistic theory:
+
+- this is not a single, stable failure mode that survives unchanged across threaded and single-threaded wasm packaging
+
+Instead, the runtime path is now split:
+
+- threaded profile: first visible stall is after `WebAssembly.Memory({ shared: true })` and before `init.complete`
+- single profile: first visible stall is at `await import("/tools/wasm-runtime-repro/pkg-single/wasm_runtime_repro.js")`
+
+That does not explain the original Mina behavior yet, but it does show that the worker/runtime sensitivity changes substantially with the packaging and initialization path.
+
+## New working hypotheses after the single-threaded build
+
+### H8. The threaded and single-threaded failures are different runtime pathologies
+
+The latest evidence suggests we are not looking at one bug with one location.
+
+Current split:
+
+- threaded build: shared-memory initialization path
+- single-threaded build: worker module loader or module evaluation path
+
+### H9. The single-threaded package may be hanging during worker-side ESM resolution or evaluation
+
+Because the last traced run reached `wasm.bindings.import.begin` but not `import.complete`, the active frontier for the single-threaded path is now:
+
+- ESM loading
+- nested import resolution
+- top-level evaluation of the generated package
+
+This is earlier than wasm instantiation and earlier than hashing.
+
+### H10. The minimal harness is now good enough to keep deconvolving runtime layers
+
+Even though the latest single-threaded run did not reach hashing, the harness is now useful in a stronger way:
+
+- it can separate module-loader issues
+- it can separate shared-memory init issues
+- it can separate later hashing issues once import/init become stable
+
+## Revised next steps after the single-threaded comparison
+
+1. Instrument around the single-threaded `import()` boundary until we can tell whether the stall is in:
+   - fetching nested module dependencies
+   - module evaluation
+   - or the transition from `import()` to `init()`
+2. Add a direct single-threaded import probe outside the hashing path, ideally:
+   - page main thread import
+   - worker import without calling any exported function
+3. Re-run the threaded variant with the same extra `import()/init()` traces for symmetry.
+4. Only after both minimal profiles can reliably reach `init.complete`, resume the backend comparison (`WebCrypto` vs wasm `sha2`).

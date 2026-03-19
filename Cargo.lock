@@ -9688,6 +9688,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-runtime-repro"
+version = "0.19.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "sha2 0.10.8",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "wasm-streams"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -40,6 +40,7 @@
       };
 
       const backend = params.get("backend") ?? "js_webcrypto";
+      const wasmProfile = params.get("wasm_profile") ?? "threaded";
       const inputMode = params.get("input_mode") ?? "js_copy";
       const sizeBytes = positiveInt("size_bytes", 3317098);
       const chunkSize = positiveInt("chunk_size", 16384);
@@ -57,6 +58,7 @@
         },
         config: {
           backend,
+          wasmProfile,
           inputMode,
           sizeBytes,
           chunkSize,
@@ -94,6 +96,7 @@
           window.location.origin,
         );
         workerUrl.searchParams.set("backend", backend);
+        workerUrl.searchParams.set("wasm_profile", wasmProfile);
         workerUrl.searchParams.set("input_mode", inputMode);
         workerUrl.searchParams.set("size_bytes", String(sizeBytes));
         workerUrl.searchParams.set("chunk_size", String(chunkSize));

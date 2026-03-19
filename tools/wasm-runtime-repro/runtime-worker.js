@@ -1,12 +1,3 @@
-import init, {
-  sha256_chunked_generated,
-  sha256_chunked_js_input,
-  sha256_chunked_yielding_generated,
-  sha256_chunked_yielding_js_input,
-  sha256_one_shot_generated,
-  sha256_one_shot_js_input,
-} from "/tools/wasm-runtime-repro/pkg/wasm_runtime_repro.js";
-
 const workerUrl = new URL(self.location.href);
 
 const positiveInt = (name, fallback) => {
@@ -20,6 +11,7 @@ const optionalPositiveInt = name => {
 };
 
 const backend = workerUrl.searchParams.get("backend") ?? "js_webcrypto";
+const wasmProfile = workerUrl.searchParams.get("wasm_profile") ?? "threaded";
 const inputMode = workerUrl.searchParams.get("input_mode") ?? "js_copy";
 const sizeBytes = positiveInt("size_bytes", 3317098);
 const chunkSize = positiveInt("chunk_size", 16384);
@@ -35,6 +27,7 @@ function trace(stage, details = undefined) {
   const mergedDetails = {
     href: self.location.href,
     backend,
+    wasmProfile,
     inputMode,
     ...(details ?? {}),
   };
@@ -88,6 +81,29 @@ function digestByteLength(digest) {
   return null;
 }
 
+async function loadWasmBindings() {
+  const pkgRoot =
+    wasmProfile === "single"
+      ? "/tools/wasm-runtime-repro/pkg-single/wasm_runtime_repro.js"
+      : "/tools/wasm-runtime-repro/pkg/wasm_runtime_repro.js";
+  trace("wasm.bindings.import.begin", {
+    pkgRoot,
+  });
+  const module = await import(pkgRoot);
+  trace("wasm.bindings.import.complete", {
+    pkgRoot,
+  });
+  return {
+    init: module.default,
+    sha256_one_shot_js_input: module.sha256_one_shot_js_input,
+    sha256_chunked_js_input: module.sha256_chunked_js_input,
+    sha256_chunked_yielding_js_input: module.sha256_chunked_yielding_js_input,
+    sha256_one_shot_generated: module.sha256_one_shot_generated,
+    sha256_chunked_generated: module.sha256_chunked_generated,
+    sha256_chunked_yielding_generated: module.sha256_chunked_yielding_generated,
+  };
+}
+
 async function runProbe() {
   const startedAt = self.performance?.now?.() ?? Date.now();
   trace("start", {
@@ -95,6 +111,7 @@ async function runProbe() {
     chunkSize,
     yieldEveryChunks,
     progressStep,
+    wasmProfile,
     forcedHardwareConcurrency,
   });
 
@@ -120,31 +137,49 @@ async function runProbe() {
       digestByteLength: digest.byteLength,
     });
   } else {
-    const memory = new WebAssembly.Memory({
-      initial: 256,
-      maximum: 65536,
-      shared: true,
+    const bindings = await loadWasmBindings();
+    trace("wasm.bindings.loaded", {
+      wasmProfile,
     });
-    trace("wasm.memory.created", {
-      initial: 256,
-      maximum: 65536,
-      shared: true,
-    });
-    await init(undefined, memory);
-    trace("wasm.init.complete", {
-      shared: memory.buffer instanceof SharedArrayBuffer,
-    });
+
+    if (wasmProfile === "threaded") {
+      const memory = new WebAssembly.Memory({
+        initial: 256,
+        maximum: 65536,
+        shared: true,
+      });
+      trace("wasm.memory.created", {
+        initial: 256,
+        maximum: 65536,
+        shared: true,
+      });
+      trace("wasm.init.begin", {
+        wasmProfile,
+      });
+      await bindings.init(undefined, memory);
+      trace("wasm.init.complete", {
+        shared: memory.buffer instanceof SharedArrayBuffer,
+      });
+    } else {
+      trace("wasm.init.begin", {
+        wasmProfile,
+      });
+      await bindings.init();
+      trace("wasm.init.complete", {
+        shared: false,
+      });
+    }
 
     if (backend === "wasm_one_shot") {
       digest =
         inputMode === "wasm_generated"
-          ? sha256_one_shot_generated(sizeBytes)
-          : sha256_one_shot_js_input(makePatternBytes(sizeBytes));
+          ? bindings.sha256_one_shot_generated(sizeBytes)
+          : bindings.sha256_one_shot_js_input(makePatternBytes(sizeBytes));
     } else if (backend === "wasm_chunked") {
       digest =
         inputMode === "wasm_generated"
-          ? sha256_chunked_generated(sizeBytes, chunkSize, progressStep)
-          : sha256_chunked_js_input(
+          ? bindings.sha256_chunked_generated(sizeBytes, chunkSize, progressStep)
+          : bindings.sha256_chunked_js_input(
               makePatternBytes(sizeBytes),
               chunkSize,
               progressStep,
@@ -152,13 +187,13 @@ async function runProbe() {
     } else if (backend === "wasm_chunked_yielding") {
       digest =
         inputMode === "wasm_generated"
-          ? await sha256_chunked_yielding_generated(
+          ? await bindings.sha256_chunked_yielding_generated(
               sizeBytes,
               chunkSize,
               yieldEveryChunks,
               progressStep,
             )
-          : await sha256_chunked_yielding_js_input(
+          : await bindings.sha256_chunked_yielding_js_input(
               makePatternBytes(sizeBytes),
               chunkSize,
               yieldEveryChunks,
@@ -173,6 +208,7 @@ async function runProbe() {
   const message = {
     type: "complete",
     backend,
+    wasmProfile,
     inputMode,
     elapsedMs,
     digestByteLength: digestByteLength(digest),

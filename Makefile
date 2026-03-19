@@ -151,6 +151,10 @@ build-wasm-runtime-repro: ## Build the minimal wasm runtime repro harness module
 		--out-dir tools/wasm-runtime-repro/pkg \
 		target/wasm32-unknown-unknown/release/wasm_runtime_repro.wasm
 
+.PHONY: build-wasm-runtime-repro-single
+build-wasm-runtime-repro-single: ## Build the single-threaded wasm runtime repro harness module
+	@tools/wasm-runtime-repro/build-single-thread-standalone.sh
+
 .PHONY: build-benches
 build-benches: ## Build all benchmarks without running them
 	@cargo bench --no-run
