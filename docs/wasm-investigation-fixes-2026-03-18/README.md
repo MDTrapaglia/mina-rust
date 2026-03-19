@@ -39,7 +39,7 @@ por fix. Cada ficha ahora incluye:
 | 14  | [14-move-payload-validation-out-of-critical-bootstrap-path.md](./14-move-payload-validation-out-of-critical-bootstrap-path.md) | mitigación       | propuesto                   | -                        |
 | 15  | [15-firefox-smoke-to-isolate-browser-specific-pathology.md](./15-firefox-smoke-to-isolate-browser-specific-pathology.md)       | diagnóstico      | validado                    | -                        |
 | 16  | [16-firefox-target-keep-vs-optional.md](./16-firefox-target-keep-vs-optional.md)                                               | nota de decisión | derivado de evidencia nueva | -                        |
-| 17  | [17-force-explicit-worker-shim-for-firefox-smoke-bringup.md](./17-force-explicit-worker-shim-for-firefox-smoke-bringup.md)     | diagnóstico      | implementado                | `757dba46a`              |
+| 17  | [17-force-explicit-worker-shim-for-firefox-smoke-bringup.md](./17-force-explicit-worker-shim-for-firefox-smoke-bringup.md)     | diagnóstico      | retirado tras revalidación  | `757dba46a`              |
 
 ## Notas
 
@@ -50,9 +50,9 @@ por fix. Cada ficha ahora incluye:
   cerrados de implementación.
 - `16` no introduce un fix nuevo: documenta qué subset seguiría siendo necesario
   si el runtime objetivo fuera Firefox.
-- `17` no cambia el runtime general del producto: fuerza el worker shim sólo
-  dentro del harness `"/wasm-smoke/"` para hacer observable y reproducible el
-  bring-up Firefox.
+- `17` quedó como diagnóstico histórico: sirvió para instrumentar una etapa del
+  smoke Firefox, pero la revalidación posterior mostró que el builder default
+  también resuelve sin ese override.
 
 ## Validación ejecutada
 
@@ -82,3 +82,5 @@ Notas de interpretación:
   - `PROTOC=/tmp/protoc-34/bin/protoc make build-wasm`: `ok`
   - Firefox headless smoke `run(null, [], [], null)`: `resolved`
   - repetición Firefox headless: `5/5` `resolved`, `0/5` `timeout`
+  - Firefox headless smoke sin override explícito del worker: `5/5`
+    `resolved`, `0/5` `timeout`

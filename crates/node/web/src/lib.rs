@@ -62,14 +62,6 @@ fn trace_stage(stage: &str) {
 fn main() {
     trace_stage("main.start");
     thread::main_thread_init();
-    if smoke_trace_enabled() {
-        // Force the explicit worker shim only for the smoke harness.
-        thread::Builder::new()
-            .worker_script_url("/wasm-smoke/mina-worker-module.js".to_owned())
-            .wasm_bindgen_shim_url("/mina-rust/pkg/mina_node_web.js".to_owned())
-            .set_default();
-        trace_stage("main.builder_default_set");
-    }
     wasm_bindgen_futures::spawn_local(async {
         trace_stage("main.init.enter");
         console_error_panic_hook::set_once();

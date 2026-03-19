@@ -15,7 +15,8 @@ comportamiento más específico de Chromium.
 
 - se corrió el smoke real en Firefox headless
 - luego se recompiló `mina-node-web` desde la rama basada en known fixes
-- la instrumentación/hardening concreta para ese smoke quedó separada en `17`
+- durante una etapa intermedia se probó un override explícito del worker, luego
+  retirado al comprobar que no era necesario para corrección
 
 ## Resultado observado
 
@@ -34,13 +35,16 @@ Artefactos útiles:
 
 - `/home/mtrapaglia/mina/logs/firefox-webnode-known-fixes-repeat-v1.json`
 - `/home/mtrapaglia/mina/logs/firefox-webnode-smoke-server-v3.log`
+- `/home/mtrapaglia/mina/logs/firefox-webnode-known-fixes-default-builder-repeat-v1.json`
+- `/home/mtrapaglia/mina/logs/firefox-webnode-known-fixes-default-builder-server-v1.log`
 
 ## Validación
 
 - el smoke en Firefox sí separó hipótesis
 - además mostró que Firefox puede usarse como baseline más robusto para el
   bring-up del web node
-- el fix de instrumentación/camino explícito del worker vive aparte en `17`
+- la revalidación posterior mostró que Firefox también pasa con el builder
+  default, sin necesitar el override documentado transitoriamente en `17`
 
 ## Dependencias
 
@@ -52,8 +56,8 @@ Artefactos útiles:
 
 - consume tiempo de diagnóstico y puede sumar variabilidad de entorno
 - no prueba por sí solo que todo el soporte browser quede resuelto
-- necesitó apoyarse en la instrumentación documentada por `17` para cerrar la
-  causa observable del timeout
+- aun con Firefox estable en este smoke, sigue faltando explicar por completo
+  la diferencia frente al frente Chromium/headless
 
 ## Alternativa descartada
 

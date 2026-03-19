@@ -3,21 +3,21 @@
 Fuente: seguimiento posterior a `Fix 15`
 
 Clasificación: `diagnóstico`
-Estado real: `implementado`
-Branch / commit: `codex/wasm-known-fixes`, `757dba46a`
+Estado real: `retirado tras revalidación`
+Branch / commit: `codex/wasm-known-fixes`, `757dba46a` -> working tree `2026-03-19`
 
 ## Archivos
 
 - `crates/node/web/src/lib.rs`
 
-## Problema
+## Problema original
 
 En el branch de known fixes, `wasm_thread` había vuelto al camino automático de
 workers `blob:`. En Firefox eso dejaba el bring-up del smoke sin visibilidad
 interna: el worker real no pasaba por el shim instrumentado del harness y
 `run(null, [], [], null)` quedaba opaco cuando colgaba o timeouteaba.
 
-## Cambio
+## Cambio aplicado inicialmente
 
 - se reinstaló un `thread::Builder` explícito con:
   - `worker_script_url("/wasm-smoke/mina-worker-module.js")`
@@ -31,26 +31,38 @@ interna: el worker real no pasaba por el shim instrumentado del harness y
   - avance de `setup_node(...)`
   - envío de `RpcSender`
 
-## Validación
+## Revalidación posterior
 
-- `make build-wasm` cerró exitosamente usando
-  `PROTOC=/tmp/protoc-34/bin/protoc`
-- smoke Firefox headless:
-  - `run(null, [], [], null)` resolvió en ~`9s`
-  - `rpcStatus()` respondió
-- repetibilidad inicial:
+- sobre `2026-03-19` se retiró de nuevo sólo el override explícito del worker,
+  manteniendo el resto del branch de known fixes igual
+- `PROTOC=/tmp/protoc-34/bin/protoc make build-wasm`: `ok`
+- Firefox headless smoke sin override explícito:
   - `5/5` corridas `resolved`
   - `0/5` timeouts
-- el log del servidor mostró:
-  - `worker.setup.block_verifier.begin/complete`
-  - `worker.setup.tx_verifier.begin/complete`
-  - `worker.setup.build.complete`
-  - `worker.run.worker.rpc_sender.sent`
+  - `run()` entre ~`10.3s` y `11.0s`
+  - `rpcStatus()` respondió en todas las corridas
+- el harness volvió a mostrar workers `blob:` del camino default de
+  `wasm_thread`
 
 Artefactos:
 
 - `/home/mtrapaglia/mina/logs/firefox-webnode-known-fixes-repeat-v1.json`
 - `/home/mtrapaglia/mina/logs/firefox-webnode-smoke-server-v3.log`
+- `/home/mtrapaglia/mina/logs/firefox-webnode-known-fixes-default-builder-repeat-v1.json`
+- `/home/mtrapaglia/mina/logs/firefox-webnode-known-fixes-default-builder-server-v1.log`
+
+## Conclusión actual
+
+El override explícito del worker ya no se sostiene como fix necesario para
+Firefox. Su valor real fue transitorio:
+
+- permitió instrumentar una etapa opaca del smoke
+- ayudó a confirmar que Firefox podía levantar el nodo
+- pero la revalidación posterior mostró que el builder default también pasa
+  `5/5`
+
+Por eso este fix queda mejor clasificado como diagnóstico histórico retirado, no
+como dependencia actual del branch.
 
 ## Dependencias
 
@@ -61,12 +73,12 @@ Artefactos:
 
 ## Riesgo / tradeoff
 
-- no es un fix de producto general: queda guardado al contexto `"/wasm-smoke/"`
-- introduce instrumentación de diagnóstico dentro del bundle wasm
-- si el layout del harness cambia, también hay que actualizar estas rutas
+- mientras estuvo activo, no era un fix de producto general
+- además acoplaba el bundle wasm al layout puntual del harness
+- mantenerlo después de la revalidación sólo agregaría complejidad innecesaria
 
 ## Alternativa descartada
 
-Seguir únicamente con el worker `blob:` automático. Se descartó para esta etapa
-porque impedía observar el punto exacto del bring-up en Firefox y demoraba la
-iteración sobre el bootstrap wasm.
+Seguir sosteniéndolo como requisito del branch. Se descarta después de la
+revalidación porque el camino `blob:` automático también levanta el nodo en
+Firefox con buena repetibilidad.

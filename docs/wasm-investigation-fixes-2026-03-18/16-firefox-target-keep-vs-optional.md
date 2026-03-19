@@ -73,6 +73,9 @@ La lectura actual es:
   aparecen como necesarios para explicar la estabilidad observada en ese browser
 - `12` puede seguir justificándose por performance aunque Firefox no lo requiera
   para corrección
+- esta nota tampoco cuenta a `17` como fix retenible: la revalidación posterior
+  mostró que el override explícito del worker no era necesario para que el
+  smoke Firefox resolviera con builder default
 
 ## Conclusión práctica
 
