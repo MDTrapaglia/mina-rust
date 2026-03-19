@@ -19,18 +19,62 @@ use mina_node::{
 };
 use mina_node_common::rpc::RpcSender;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::node::P2pTaskRemoteSpawner;
+
+fn global_string_property(target: &JsValue, key: &str) -> Option<String> {
+    js_sys::Reflect::get(target, &JsValue::from_str(key))
+        .ok()?
+        .as_string()
+}
+
+fn smoke_trace_enabled() -> bool {
+    let global = js_sys::global();
+    let location = js_sys::Reflect::get(&global, &JsValue::from_str("location")).ok();
+    location
+        .and_then(|location| global_string_property(&location, "pathname"))
+        .is_some_and(|pathname| pathname.starts_with("/wasm-smoke/"))
+}
+
+fn trace_stage(stage: &str) {
+    if !smoke_trace_enabled() {
+        return;
+    }
+
+    let global = js_sys::global();
+    let Ok(fetch) = js_sys::Reflect::get(&global, &JsValue::from_str("fetch")) else {
+        return;
+    };
+    let Ok(fetch) = fetch.dyn_into::<js_sys::Function>() else {
+        return;
+    };
+
+    let url = format!(
+        "/wasm-smoke/trace?stage={}",
+        js_sys::encode_uri_component(stage)
+    );
+    let _ = fetch.call1(&global, &JsValue::from_str(&url));
+}
 
 /// Automatically run after wasm is loaded.
 #[wasm_bindgen(start)]
 fn main() {
+    trace_stage("main.start");
     thread::main_thread_init();
+    thread::Builder::new()
+        .worker_script_url("/wasm-smoke/mina-worker-module.js".to_owned())
+        .wasm_bindgen_shim_url("/mina-rust/pkg/mina_node_web.js".to_owned())
+        .set_default();
+    trace_stage("main.builder_default_set");
     wasm_bindgen_futures::spawn_local(async {
+        trace_stage("main.init.enter");
         console_error_panic_hook::set_once();
         tracing::initialize(tracing::Level::DEBUG);
 
+        trace_stage("main.init_rayon.begin");
         init_rayon().await.unwrap();
+        trace_stage("main.init_rayon.complete");
     });
 }
 
@@ -127,11 +171,15 @@ pub async fn run(
     seed_nodes_addresses: Option<Vec<String>>,
     genesis_config_url: Option<String>,
 ) -> RpcSender {
+    trace_stage("main.run.start");
     let block_producer = parse_bp_key(block_producer);
 
     let (rpc_sender_tx, rpc_sender_rx) = ::mina_node::core::channels::oneshot::channel();
+    trace_stage("main.run.spawn.before");
     let _ = thread::spawn(move || {
+        trace_stage("worker.run.worker.enter");
         wasm_bindgen_futures::spawn_local(async move {
+            trace_stage("worker.run.worker.spawn_local.enter");
             let mut node = setup_node(
                 block_producer,
                 seed_nodes_urls,
@@ -139,12 +187,17 @@ pub async fn run(
                 genesis_config_url,
             )
             .await;
+            trace_stage("worker.run.worker.setup_node.complete");
             let _ = rpc_sender_tx.send(node.rpc());
+            trace_stage("worker.run.worker.rpc_sender.sent");
             node.run_forever().await;
         });
 
+        trace_stage("worker.run.worker.spawn_local.scheduled");
+        trace_stage("worker.run.worker.keepalive.before_throw");
         keep_worker_alive_cursed_hack();
     });
+    trace_stage("main.run.spawn.after");
 
     rpc_sender_rx.await.unwrap()
 }
@@ -155,9 +208,15 @@ async fn setup_node(
     seed_nodes_addresses: Option<Vec<String>>,
     genesis_config_url: Option<String>,
 ) -> mina_node_common::Node<NodeService> {
+    trace_stage("worker.setup.start");
+    trace_stage("worker.setup.block_verifier.begin");
     let block_verifier_index = BlockVerifier::make().await;
+    trace_stage("worker.setup.block_verifier.complete");
+    trace_stage("worker.setup.tx_verifier.begin");
     let work_verifier_index = TransactionVerifier::make().await;
+    trace_stage("worker.setup.tx_verifier.complete");
 
+    trace_stage("worker.setup.genesis.begin");
     let genesis_config = if let Some(genesis_config_url) = genesis_config_url {
         let bytes = ::mina_node::core::http::get_bytes(&genesis_config_url)
             .await
@@ -166,16 +225,20 @@ async fn setup_node(
     } else {
         ::mina_node::config::DEVNET_CONFIG.clone()
     };
+    trace_stage("worker.setup.genesis.complete");
 
+    trace_stage("worker.setup.builder.begin");
     let mut node_builder: NodeBuilder = NodeBuilder::new(None, genesis_config);
     node_builder
         .block_verifier_index(block_verifier_index.clone())
         .work_verifier_index(work_verifier_index.clone());
+    trace_stage("worker.setup.builder.verifiers_wired");
 
     // TODO(binier): refactor
     let mut all_raw_peers = seed_nodes_addresses.unwrap_or_default();
 
     if let Some(seed_nodes_urls) = seed_nodes_urls {
+        trace_stage("worker.setup.seed_urls.begin");
         for seed_nodes_url in seed_nodes_urls {
             let peers = ::mina_node::core::http::get_bytes(&seed_nodes_url).await;
             match peers {
@@ -188,8 +251,10 @@ async fn setup_node(
                 }
             }
         }
+        trace_stage("worker.setup.seed_urls.complete");
     }
 
+    trace_stage("worker.setup.initial_peers.begin");
     node_builder.initial_peers(
         all_raw_peers
             .iter()
@@ -198,19 +263,25 @@ async fn setup_node(
             .flat_map(|s| s.parse().ok())
             .inspect(|p| log::debug!("Using peer: {p:?}")),
     );
+    trace_stage("worker.setup.initial_peers.complete");
 
     if let Some(bp_key) = block_producer {
+        trace_stage("worker.setup.block_producer.begin");
         thread::spawn(move || {
             BlockProver::make(Some(block_verifier_index), Some(work_verifier_index));
         });
         node_builder.block_producer(bp_key, None);
+        trace_stage("worker.setup.block_producer.complete");
     }
 
+    trace_stage("worker.setup.build.begin");
     node_builder
         .p2p_custom_task_spawner(P2pTaskRemoteSpawner {})
         .unwrap();
     node_builder.gather_stats();
-    node_builder.build().context("node build failed!").unwrap()
+    let node = node_builder.build().context("node build failed!").unwrap();
+    trace_stage("worker.setup.build.complete");
+    node
 }
 
 fn keep_worker_alive_cursed_hack() {
