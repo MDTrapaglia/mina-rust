@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mina Wasm Webnode Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #0e0f12;
+        --bg-soft: #131720;
+        --bg-card: #171c26;
+        --ink: #eef2f6;
+        --muted: #9aa4b2;
+        --accent: #3dd4b5;
+        --accent-2: #5aa9ff;
+        --warn: #f2c94c;
+        --danger: #ff6b6b;
+        --border: #222938;
+        --shadow: 0 18px 40px rgba(8, 12, 18, 0.35);
+        --radius: 16px;
+        --radius-sm: 10px;
+        --font-sans: "Space Grotesk", "Manrope", "IBM Plex Sans", sans-serif;
+        --font-mono: "JetBrains Mono", "Iosevka", "SF Mono", ui-monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: var(--font-sans);
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top, rgba(90, 169, 255, 0.18), transparent 50%),
+          radial-gradient(circle at 20% 20%, rgba(61, 212, 181, 0.2), transparent 45%),
+          linear-gradient(160deg, #0b0d12 0%, #121725 50%, #0e131d 100%);
+      }
+
+      header {
+        padding: 32px 40px 18px;
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .title {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .title h1 {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+      }
+
+      .title span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      main {
+        padding: 0 40px 48px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      .card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 18px 20px;
+        box-shadow: var(--shadow);
+        position: relative;
+        overflow: hidden;
+        animation: floatIn 0.5s ease forwards;
+      }
+
+      @keyframes floatIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        align-items: end;
+      }
+
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      input,
+      select,
+      button,
+      textarea {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        color: var(--ink);
+        background: var(--bg-soft);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+
+      button {
+        font-family: var(--font-sans);
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      button.primary {
+        background: linear-gradient(120deg, var(--accent), var(--accent-2));
+        color: #051015;
+        border: none;
+      }
+
+      button.ghost {
+        background: transparent;
+        border: 1px solid var(--border);
+      }
+
+      button:active {
+        transform: scale(0.98);
+      }
+
+      .status-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      }
+
+      .stat {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-family: var(--font-mono);
+      }
+
+      .stat .label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .stat .value {
+        font-size: 20px;
+        font-weight: 600;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        background: rgba(61, 212, 181, 0.2);
+        color: var(--accent);
+      }
+
+      .badge.warn {
+        background: rgba(242, 201, 76, 0.2);
+        color: var(--warn);
+      }
+
+      .badge.danger {
+        background: rgba(255, 107, 107, 0.2);
+        color: var(--danger);
+      }
+
+      .layout-2 {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+      }
+
+      .chart {
+        height: 220px;
+        width: 100%;
+        background: #101521;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+      }
+
+      th {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .timeline {
+        max-height: 320px;
+        overflow: auto;
+      }
+
+      .footer {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 4px;
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .pill {
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(90, 169, 255, 0.15);
+        color: var(--accent-2);
+        font-size: 12px;
+        font-family: var(--font-mono);
+      }
+
+      @media (max-width: 960px) {
+        header,
+        main {
+          padding: 24px;
+        }
+
+        .layout-2 {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="title">
+        <h1>Mina Wasm Webnode Dashboard</h1>
+        <span>Firefox devnet monitoring with local history</span>
+      </div>
+      <div class="pill-row" id="env-pill-row"></div>
+    </header>
+
+    <main>
+      <section class="card">
+        <div class="controls">
+          <label>
+            Seed URL
+            <input
+              id="seed-url"
+              placeholder="https://bootnodes.minaprotocol.com/networks/devnet-webrtc.txt"
+            />
+          </label>
+          <label>
+            Seed Addresses (comma)
+            <input id="seed-addresses" placeholder="/dns4/..." />
+          </label>
+          <label>
+            Poll Interval (ms)
+            <input id="poll-interval" type="number" value="5000" />
+          </label>
+          <label>
+            Duration (min)
+            <input id="poll-duration" type="number" value="30" />
+          </label>
+          <label>
+            Retention (polls)
+            <input id="retention" type="number" value="1000" />
+          </label>
+          <label>
+            Actions
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="primary" id="start-btn">Start</button>
+              <button class="ghost" id="stop-btn">Stop</button>
+              <button class="ghost" id="export-json-btn">Export JSON</button>
+              <button class="ghost" id="export-csv-btn">Export CSV</button>
+            </div>
+          </label>
+        </div>
+      </section>
+
+      <section class="card status-grid" id="status-cards">
+        <div class="stat">
+          <span class="label">Run</span>
+          <span class="value" id="run-state">idle</span>
+          <span class="badge" id="run-badge">idle</span>
+        </div>
+        <div class="stat">
+          <span class="label">Sync</span>
+          <span class="value" id="sync-state">-</span>
+          <span class="badge" id="sync-badge">unknown</span>
+        </div>
+        <div class="stat">
+          <span class="label">Best Tip</span>
+          <span class="value" id="best-tip">-</span>
+          <span class="badge" id="best-tip-badge">height</span>
+        </div>
+        <div class="stat">
+          <span class="label">Peers</span>
+          <span class="value" id="peer-count">0</span>
+          <span class="badge" id="peer-badge">offline</span>
+        </div>
+        <div class="stat">
+          <span class="label">Last Poll</span>
+          <span class="value" id="last-poll">-</span>
+          <span class="badge" id="poll-badge">waiting</span>
+        </div>
+        <div class="stat">
+          <span class="label">Run ID</span>
+          <span class="value" id="run-id">-</span>
+          <span class="badge" id="run-duration">0s</span>
+        </div>
+      </section>
+
+      <section class="layout-2">
+        <div class="card">
+          <h3>Timeline</h3>
+          <canvas class="chart" id="chart"></canvas>
+          <div class="footer" id="chart-footer"></div>
+        </div>
+        <div class="card">
+          <h3>Peers Snapshot</h3>
+          <div id="peer-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+          <div class="footer">Latest peers (up to 5)</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Polling Log</h3>
+        <div class="timeline">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Sync</th>
+                <th>Best Tip</th>
+                <th>Peers</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="poll-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module">
+      const DB_NAME = "mina-wasm-webnode";
+      const DB_VERSION = 1;
+      const POLL_TABLE_LIMIT = 200;
+      const chart = document.getElementById("chart");
+      const chartFooter = document.getElementById("chart-footer");
+      const runState = document.getElementById("run-state");
+      const runBadge = document.getElementById("run-badge");
+      const syncState = document.getElementById("sync-state");
+      const syncBadge = document.getElementById("sync-badge");
+      const bestTip = document.getElementById("best-tip");
+      const bestTipBadge = document.getElementById("best-tip-badge");
+      const peerCount = document.getElementById("peer-count");
+      const peerBadge = document.getElementById("peer-badge");
+      const lastPoll = document.getElementById("last-poll");
+      const pollBadge = document.getElementById("poll-badge");
+      const runIdField = document.getElementById("run-id");
+      const runDuration = document.getElementById("run-duration");
+      const pollTable = document.getElementById("poll-table");
+      const peerList = document.getElementById("peer-list");
+      const envPillRow = document.getElementById("env-pill-row");
+
+      const seedUrlInput = document.getElementById("seed-url");
+      const seedAddressesInput = document.getElementById("seed-addresses");
+      const pollIntervalInput = document.getElementById("poll-interval");
+      const pollDurationInput = document.getElementById("poll-duration");
+      const retentionInput = document.getElementById("retention");
+
+      const startBtn = document.getElementById("start-btn");
+      const stopBtn = document.getElementById("stop-btn");
+      const exportJsonBtn = document.getElementById("export-json-btn");
+      const exportCsvBtn = document.getElementById("export-csv-btn");
+
+      let dbPromise = null;
+      let wasmModule = null;
+      let rpcSender = null;
+      let pollTimer = null;
+      let currentRun = null;
+      let pollCache = [];
+
+      const params = new URLSearchParams(window.location.search);
+      seedUrlInput.value =
+        params.get("seed_nodes_url") ??
+        "https://bootnodes.minaprotocol.com/networks/devnet-webrtc.txt";
+      seedAddressesInput.value = params.get("seed_nodes_address") ?? "";
+      pollIntervalInput.value = params.get("poll_interval_ms") ?? "5000";
+      pollDurationInput.value = params.get("poll_duration_min") ?? "30";
+      retentionInput.value = params.get("retention") ?? "1000";
+
+      const pushEnvPill = (label, value) => {
+        const pill = document.createElement("div");
+        pill.className = "pill";
+        pill.textContent = `${label}: ${value}`;
+        envPillRow.appendChild(pill);
+      };
+
+      pushEnvPill("UA", navigator.userAgent.split(")")[0] + ")");
+      pushEnvPill("COOP/COEP", window.crossOriginIsolated ? "yes" : "no");
+      pushEnvPill("HW", navigator.hardwareConcurrency ?? "n/a");
+
+      function openDb() {
+        if (dbPromise) {
+          return dbPromise;
+        }
+        dbPromise = new Promise((resolve, reject) => {
+          const request = indexedDB.open(DB_NAME, DB_VERSION);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains("runs")) {
+              db.createObjectStore("runs", { keyPath: "id" });
+            }
+            if (!db.objectStoreNames.contains("polls")) {
+              const store = db.createObjectStore("polls", {
+                keyPath: "id",
+                autoIncrement: true,
+              });
+              store.createIndex("runId", "runId", { unique: false });
+              store.createIndex("ts", "ts", { unique: false });
+            }
+          };
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+        });
+        return dbPromise;
+      }
+
+      const formatTime = date => date.toLocaleTimeString();
+      const formatDuration = ms => {
+        const seconds = Math.floor(ms / 1000);
+        const min = Math.floor(seconds / 60);
+        const sec = seconds % 60;
+        if (min > 0) {
+          return `${min}m ${sec}s`;
+        }
+        return `${sec}s`;
+      };
+
+      function setBadge(el, text, tone) {
+        el.textContent = text;
+        el.className = "badge";
+        if (tone === "warn") {
+          el.classList.add("warn");
+        }
+        if (tone === "danger") {
+          el.classList.add("danger");
+        }
+      }
+
+      function updateHeaderState(state) {
+        runState.textContent = state;
+        setBadge(runBadge, state, state === "running" ? null : "warn");
+      }
+
+      async function initWasm() {
+        if (wasmModule) {
+          return wasmModule;
+        }
+        const wasm = await import("/mina-rust/pkg/mina_node_web.js");
+        const memory = new WebAssembly.Memory({
+          initial: 256,
+          maximum: 65536,
+          shared: true,
+        });
+        await wasm.default(undefined, memory);
+        wasmModule = wasm;
+        return wasmModule;
+      }
+
+      function summarizeStatus(status) {
+        if (!status) {
+          return null;
+        }
+        const bestTip = status.transition_frontier?.best_tip ?? null;
+        const sync = status.transition_frontier?.sync ?? null;
+        const peers = status.peers ?? [];
+        return {
+          chainId: status.chain_id ?? null,
+          syncStatus: sync?.status ?? null,
+          syncPhase: sync?.phase ?? null,
+          bestTipHeight: bestTip?.height ?? null,
+          bestTipHash: bestTip?.hash ?? null,
+          peersCount: peers.length,
+          peersSample: peers.slice(0, 5).map(peer => ({
+            peerId: peer.peer_id,
+            status: peer.connection_status,
+            addr: peer.address,
+          })),
+          queues: status.service_queues ?? null,
+          resources: status.resources_status ?? null,
+        };
+      }
+
+      async function createRunRecord(config, buildEnv) {
+        const db = await openDb();
+        const runId = `run-${Date.now()}`;
+        const run = {
+          id: runId,
+          startedAt: new Date().toISOString(),
+          endedAt: null,
+          status: "running",
+          config,
+          buildEnv,
+          browser: {
+            userAgent: navigator.userAgent,
+            crossOriginIsolated: window.crossOriginIsolated,
+            hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+          },
+        };
+        const tx = db.transaction("runs", "readwrite");
+        tx.objectStore("runs").put(run);
+        return run;
+      }
+
+      async function updateRunRecord(patch) {
+        if (!currentRun) {
+          return;
+        }
+        const db = await openDb();
+        const tx = db.transaction("runs", "readwrite");
+        const store = tx.objectStore("runs");
+        const existing = await new Promise(resolve => {
+          const req = store.get(currentRun.id);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve(null);
+        });
+        if (!existing) {
+          return;
+        }
+        store.put({ ...existing, ...patch });
+      }
+
+      async function addPollRecord(summary, raw) {
+        if (!currentRun) {
+          return;
+        }
+        const db = await openDb();
+        const tx = db.transaction("polls", "readwrite");
+        const store = tx.objectStore("polls");
+        store.add({
+          runId: currentRun.id,
+          ts: new Date().toISOString(),
+          summary,
+          raw,
+        });
+      }
+
+      function appendPollRow(summary, note) {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${formatTime(new Date())}</td>
+          <td>${summary?.syncStatus ?? "-"}</td>
+          <td>${summary?.bestTipHeight ?? "-"}</td>
+          <td>${summary?.peersCount ?? 0}</td>
+          <td>${note ?? ""}</td>
+        `;
+        pollTable.prepend(row);
+        while (pollTable.children.length > POLL_TABLE_LIMIT) {
+          pollTable.removeChild(pollTable.lastChild);
+        }
+      }
+
+      function updatePeers(summary) {
+        peerList.innerHTML = "";
+        if (!summary || summary.peersSample.length === 0) {
+          const empty = document.createElement("div");
+          empty.textContent = "No peers yet";
+          empty.className = "footer";
+          peerList.appendChild(empty);
+          return;
+        }
+        summary.peersSample.forEach(peer => {
+          const el = document.createElement("div");
+          el.className = "pill";
+          el.textContent = `${peer.peerId} (${peer.status})`;
+          peerList.appendChild(el);
+        });
+      }
+
+      function updateStats(summary) {
+        if (!summary) {
+          syncState.textContent = "-";
+          bestTip.textContent = "-";
+          peerCount.textContent = "0";
+          setBadge(syncBadge, "unknown", "warn");
+          setBadge(peerBadge, "offline", "danger");
+          return;
+        }
+        syncState.textContent = summary.syncStatus ?? "-";
+        bestTip.textContent = summary.bestTipHeight ?? "-";
+        peerCount.textContent = String(summary.peersCount ?? 0);
+        setBadge(
+          syncBadge,
+          summary.syncStatus ?? "unknown",
+          summary.syncStatus === "Synced" ? null : "warn",
+        );
+        setBadge(
+          peerBadge,
+          summary.peersCount > 0 ? "connected" : "offline",
+          summary.peersCount > 0 ? null : "warn",
+        );
+        bestTipBadge.textContent = summary.bestTipHash
+          ? summary.bestTipHash.slice(0, 8)
+          : "height";
+        updatePeers(summary);
+      }
+
+      function renderChart() {
+        const ctx = chart.getContext("2d");
+        const width = chart.clientWidth;
+        const height = chart.clientHeight;
+        chart.width = width * window.devicePixelRatio;
+        chart.height = height * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        ctx.clearRect(0, 0, width, height);
+
+        if (pollCache.length === 0) {
+          ctx.fillStyle = "#6f7a8a";
+          ctx.font = "14px " + getComputedStyle(document.body).fontFamily;
+          ctx.fillText("No data yet", 16, 30);
+          return;
+        }
+
+        const heights = pollCache.map(item => item.summary.bestTipHeight ?? 0);
+        const peers = pollCache.map(item => item.summary.peersCount ?? 0);
+        const minHeight = Math.min(...heights);
+        const maxHeight = Math.max(...heights);
+        const maxPeers = Math.max(...peers, 1);
+
+        const pad = 16;
+        const plotW = width - pad * 2;
+        const plotH = height - pad * 2;
+
+        const xStep = plotW / Math.max(1, pollCache.length - 1);
+        const heightRange = Math.max(1, maxHeight - minHeight);
+
+        ctx.strokeStyle = "#2b3345";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad, pad);
+        ctx.lineTo(pad, height - pad);
+        ctx.lineTo(width - pad, height - pad);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#3dd4b5";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        pollCache.forEach((item, idx) => {
+          const x = pad + idx * xStep;
+          const y =
+            height - pad -
+            ((item.summary.bestTipHeight ?? minHeight) - minHeight) *
+              (plotH / heightRange);
+          if (idx === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+
+        ctx.strokeStyle = "#5aa9ff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        pollCache.forEach((item, idx) => {
+          const x = pad + idx * xStep;
+          const y = height - pad - (item.summary.peersCount / maxPeers) * plotH;
+          if (idx === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+
+        chartFooter.textContent = `Best tip: ${minHeight} → ${maxHeight} | Max peers: ${maxPeers}`;
+      }
+
+      async function pollOnce() {
+        if (!rpcSender) {
+          return;
+        }
+        try {
+          const status = await rpcSender.status();
+          const summary = summarizeStatus(status);
+          pollCache.push({ summary, ts: Date.now() });
+          const retention = Number(retentionInput.value || "1000");
+          if (pollCache.length > retention) {
+            pollCache = pollCache.slice(-retention);
+          }
+          updateStats(summary);
+          appendPollRow(summary, "");
+          addPollRecord(summary, status);
+          lastPoll.textContent = formatTime(new Date());
+          setBadge(pollBadge, "ok", null);
+          renderChart();
+        } catch (error) {
+          setBadge(pollBadge, "error", "danger");
+          appendPollRow(null, error instanceof Error ? error.message : String(error));
+        }
+      }
+
+      function stopPolling() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      async function startRun() {
+        if (rpcSender) {
+          return;
+        }
+        updateHeaderState("starting");
+        const seedUrl = seedUrlInput.value.trim();
+        const seedAddresses = seedAddressesInput.value
+          .split(",")
+          .map(item => item.trim())
+          .filter(Boolean);
+        const pollIntervalMs = Number(pollIntervalInput.value || "5000");
+        const durationMin = Number(pollDurationInput.value || "0");
+        const config = {
+          seedUrl,
+          seedAddresses,
+          pollIntervalMs,
+          durationMin,
+        };
+        const wasm = await initWasm();
+        const buildEnv = wasm.build_env ? wasm.build_env() : null;
+        currentRun = await createRunRecord(config, buildEnv);
+        runIdField.textContent = currentRun.id;
+
+        rpcSender = await wasm.run(
+          null,
+          seedUrl ? [seedUrl] : null,
+          seedAddresses.length > 0 ? seedAddresses : null,
+          null,
+        );
+        updateHeaderState("running");
+        setBadge(runBadge, "running", null);
+        setBadge(pollBadge, "polling", null);
+
+        const startedAt = Date.now();
+        pollTimer = setInterval(pollOnce, pollIntervalMs);
+        pollOnce();
+        const endAfterMs = durationMin > 0 ? durationMin * 60_000 : null;
+        const durationTimer = setInterval(() => {
+          runDuration.textContent = formatDuration(Date.now() - startedAt);
+          if (endAfterMs && Date.now() - startedAt >= endAfterMs) {
+            clearInterval(durationTimer);
+            stopRun();
+          }
+        }, 1000);
+      }
+
+      async function stopRun() {
+        stopPolling();
+        updateHeaderState("stopped");
+        setBadge(runBadge, "stopped", "warn");
+        await updateRunRecord({
+          endedAt: new Date().toISOString(),
+          status: "stopped",
+        });
+      }
+
+      async function exportJson() {
+        const db = await openDb();
+        const runs = await new Promise(resolve => {
+          const req = db.transaction("runs").objectStore("runs").getAll();
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve([]);
+        });
+        const polls = await new Promise(resolve => {
+          const req = db.transaction("polls").objectStore("polls").getAll();
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve([]);
+        });
+        const blob = new Blob([JSON.stringify({ runs, polls }, null, 2)], {
+          type: "application/json",
+        });
+        downloadBlob(blob, "mina-webnode-history.json");
+      }
+
+      async function exportCsv() {
+        const db = await openDb();
+        const polls = await new Promise(resolve => {
+          const req = db.transaction("polls").objectStore("polls").getAll();
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve([]);
+        });
+        const rows = [
+          ["runId", "ts", "syncStatus", "bestTipHeight", "bestTipHash", "peers"],
+        ];
+        polls.forEach(row => {
+          const summary = row.summary ?? {};
+          rows.push([
+            row.runId,
+            row.ts,
+            summary.syncStatus ?? "",
+            summary.bestTipHeight ?? "",
+            summary.bestTipHash ?? "",
+            summary.peersCount ?? 0,
+          ]);
+        });
+        const csv = rows.map(line => line.map(String).join(",")).join("\n");
+        downloadBlob(new Blob([csv], { type: "text/csv" }), "mina-webnode-history.csv");
+      }
+
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      startBtn.addEventListener("click", () => startRun());
+      stopBtn.addEventListener("click", () => stopRun());
+      exportJsonBtn.addEventListener("click", () => exportJson());
+      exportCsvBtn.addEventListener("click", () => exportCsv());
+
+      updateHeaderState("idle");
+      renderChart();
+    </script>
+  </body>
+</html>
