@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Wasm Runtime Repro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        background: #101418;
+        color: #d7e2ea;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 0;
+        padding: 24px;
+      }
+
+      pre {
+        background: #182028;
+        border-radius: 8px;
+        overflow: auto;
+        padding: 16px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Wasm runtime repro</h1>
+    <pre id="result">running...</pre>
+    <script type="module">
+      const out = document.getElementById("result");
+      const params = new URLSearchParams(window.location.search);
+
+      const positiveInt = (name, fallback) => {
+        const raw = Number(params.get(name) ?? String(fallback));
+        return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : fallback;
+      };
+
+      const optionalPositiveInt = name => {
+        const raw = Number(params.get(name) ?? "");
+        return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : null;
+      };
+
+      const backend = params.get("backend") ?? "js_webcrypto";
+      const inputMode = params.get("input_mode") ?? "js_copy";
+      const sizeBytes = positiveInt("size_bytes", 3317098);
+      const chunkSize = positiveInt("chunk_size", 16384);
+      const yieldEveryChunks = positiveInt("yield_every_chunks", 4);
+      const progressStep = positiveInt("progress_step", 1048576);
+      const timeoutMs = positiveInt("timeout_ms", 60000);
+      const forcedHardwareConcurrency =
+        optionalPositiveInt("forced_hardware_concurrency");
+
+      const result = {
+        browser: {
+          crossOriginIsolated: window.crossOriginIsolated,
+          hardwareConcurrency: navigator.hardwareConcurrency,
+          userAgent: navigator.userAgent,
+        },
+        config: {
+          backend,
+          inputMode,
+          sizeBytes,
+          chunkSize,
+          yieldEveryChunks,
+          progressStep,
+          timeoutMs,
+          forcedHardwareConcurrency,
+        },
+        run: {
+          state: "pending",
+        },
+        errors: [],
+      };
+
+      const flush = () => {
+        out.textContent = JSON.stringify(result, null, 2);
+        console.log("RUNTIME_REPRO_RESULT", JSON.stringify(result));
+      };
+
+      const sendTrace = (stage, details = null) => {
+        const query = new URLSearchParams({
+          stage: `runtime-harness:${stage}`,
+        });
+        if (details !== null) {
+          query.set("details", details);
+        }
+        fetch(`/wasm-smoke/trace?${query.toString()}`, {
+          cache: "no-store",
+        }).catch(() => undefined);
+      };
+
+      async function main() {
+        const workerUrl = new URL(
+          "/tools/wasm-runtime-repro/runtime-worker.js",
+          window.location.origin,
+        );
+        workerUrl.searchParams.set("backend", backend);
+        workerUrl.searchParams.set("input_mode", inputMode);
+        workerUrl.searchParams.set("size_bytes", String(sizeBytes));
+        workerUrl.searchParams.set("chunk_size", String(chunkSize));
+        workerUrl.searchParams.set(
+          "yield_every_chunks",
+          String(yieldEveryChunks),
+        );
+        workerUrl.searchParams.set("progress_step", String(progressStep));
+        workerUrl.searchParams.set("timeout_ms", String(timeoutMs));
+        if (forcedHardwareConcurrency !== null) {
+          workerUrl.searchParams.set(
+            "forced_hardware_concurrency",
+            String(forcedHardwareConcurrency),
+          );
+        }
+
+        sendTrace("page.start", JSON.stringify(result.config));
+        const worker = new Worker(workerUrl, { type: "module" });
+
+        const completion = new Promise(resolve => {
+          worker.addEventListener("message", event => {
+            resolve(event.data);
+          });
+          worker.addEventListener("error", event => {
+            resolve({
+              type: "error",
+              message: event.message ?? "worker error",
+              filename: event.filename ?? null,
+              lineno: event.lineno ?? null,
+              colno: event.colno ?? null,
+            });
+          });
+          worker.addEventListener("messageerror", () => {
+            resolve({
+              type: "error",
+              message: "worker messageerror",
+            });
+          });
+        });
+
+        const startedAt = performance.now();
+        const timeoutToken = Symbol("timeout");
+        const outcome = await Promise.race([
+          completion,
+          new Promise(resolve => setTimeout(() => resolve(timeoutToken), timeoutMs)),
+        ]);
+
+        if (outcome === timeoutToken) {
+          worker.terminate();
+          result.run = {
+            state: "timeout",
+            elapsedMs: Math.round(performance.now() - startedAt),
+            timeoutMs,
+          };
+          sendTrace("page.timeout", String(result.run.elapsedMs));
+          flush();
+          return;
+        }
+
+        worker.terminate();
+        if (outcome?.type === "complete") {
+          result.run = {
+            state: "resolved",
+            elapsedMs: outcome.elapsedMs,
+            digestByteLength: outcome.digestByteLength,
+            backend: outcome.backend,
+            inputMode: outcome.inputMode,
+          };
+          sendTrace("page.complete", JSON.stringify(result.run));
+        } else {
+          result.run = {
+            state: "failed",
+            elapsedMs: Math.round(performance.now() - startedAt),
+          };
+          result.errors.push(outcome ?? { type: "error", message: "unknown error" });
+          sendTrace("page.error", JSON.stringify(outcome ?? {}));
+        }
+
+        flush();
+      }
+
+      main().catch(error => {
+        result.run = {
+          state: "failed",
+        };
+        result.errors.push({
+          type: "main",
+          message: error instanceof Error ? error.stack ?? error.message : String(error),
+        });
+        flush();
+      });
+
+      flush();
+    </script>
+  </body>
+</html>

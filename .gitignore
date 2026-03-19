@@ -8,6 +8,7 @@ node_modules
 
 # Output of build-wasm
 pkg/
+tools/wasm-runtime-repro/pkg/
 
 # Outputs of build-tests-webrtc
 cargo-build-test.json

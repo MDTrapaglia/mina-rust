@@ -32,6 +32,7 @@ members = [
   "tools/ledger-tool",
   "tools/testing",
   "tools/transport",
+  "tools/wasm-runtime-repro",
   "tools/webrtc-sniffer",
   # Reusable libraries (project-agnostic, potentially publishable)
   "libs/alloc-test",

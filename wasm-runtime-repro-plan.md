@@ -362,3 +362,135 @@ That is the reason for splitting this work into a dedicated runtime-repro branch
    - payload sizes
    - completion variability
    - headless vs non-headless notes
+
+## Update 2026-03-19: first minimal harness landed
+
+The branch now has a versioned minimal harness under:
+
+- `tools/wasm-runtime-repro/index.html`
+- `tools/wasm-runtime-repro/runtime-worker.js`
+- `tools/wasm-runtime-repro/src/lib.rs`
+- `Makefile` target: `build-wasm-runtime-repro`
+
+This harness does not load `mina-node-web`.
+
+It supports:
+
+- JS `WebCrypto`
+- wasm `sha2` one shot
+- wasm `sha2` chunked
+- wasm `sha2` chunked plus yield
+- JS-generated input copied into wasm
+- wasm-generated input
+
+The current build path for this minimal module is still aligned with the repo's threaded wasm profile:
+
+- shared memory
+- atomics
+- rebuilt `std` with `-Z build-std=std,panic_abort`
+
+That means the harness is already useful to separate "Mina logic" from "threaded wasm runtime", even though it does not yet provide the single-threaded comparison.
+
+## Update 2026-03-19: first results from the minimal harness
+
+### Result A. Pure JS `WebCrypto` did not reproduce the old stall
+
+Headless Chromium run:
+
+- page: `tools/wasm-runtime-repro/index.html`
+- backend: `js_webcrypto`
+- size: `3317098` bytes
+- timeout budget: `60000 ms`
+
+Observed result:
+
+- `run.state = resolved`
+- `digestByteLength = 32`
+- no JS-visible errors
+- server traces reached:
+  - `runtime-worker:js-webcrypto.begin`
+  - `runtime-worker:js-webcrypto.complete`
+  - `runtime-worker:complete`
+
+This is a meaningful change from the earlier Mina-adjacent harness behavior, where a large `crypto.subtle.digest(...)` in the worker could hang.
+
+### Result B. Minimal threaded wasm did not reach hashing yet
+
+Headless Chromium run:
+
+- backend: `wasm_chunked_yielding`
+- input mode: `js_copy`
+- size: `3317098` bytes
+- chunk size: `16384`
+- yield every `4` chunks
+- timeout budget: `60000 ms`
+
+Observed result:
+
+- `run.state = timeout`
+- no JS-visible errors
+- server traces reached:
+  - `runtime-worker:start`
+  - `runtime-worker:wasm.memory.created`
+  - fetch of `pkg/wasm_runtime_repro_bg.wasm`
+- traces did not reach:
+  - `runtime-worker:wasm.init.complete`
+  - any Rust-side hashing marker
+
+This remained true even after removing our own `fetch('/wasm-smoke/trace')` call from the module `#[wasm_bindgen(start)]` hook, which was a plausible source of self-inflicted initialization interference.
+
+## Updated interpretation
+
+The current minimal harness produced two important clarifications:
+
+1. Large-buffer `WebCrypto` does not automatically fail in the stripped-down worker harness.
+2. The first minimal threaded wasm attempt is currently blocked at module initialization, before hashing begins.
+
+That means the first runtime-repro pass did not yet isolate the original hash pathology cleanly. Instead, it split the problem into two new branches:
+
+- branch A: the old JS `WebCrypto` instability may have depended on Mina-side runtime load, scheduling, or integration details that are absent in the minimal harness
+- branch B: the minimal threaded wasm module may still be missing part of the runtime contract expected by a shared-memory `wasm-bindgen` module in this worker setup
+
+## New working hypotheses after the first minimal harness
+
+### H5. The earlier JS `WebCrypto` stall was environment-sensitive, not size-only
+
+Because the minimal `js_webcrypto` probe now resolves cleanly at `3317098` bytes, payload size alone is not enough to reproduce the prior behavior.
+
+Plausible missing ingredients include:
+
+- additional Mina runtime load
+- different worker lifecycle
+- different module initialization ordering
+- previous instrumentation side effects
+
+### H6. The current minimal threaded wasm harness is not yet semantically equivalent to Mina wasm init
+
+The timeout before `wasm.init.complete` suggests the new harness may still be wrong or incomplete at initialization time.
+
+Candidates:
+
+- missing `thread_stack_size`
+- wrong or incomplete `init(...)` contract for the shared-memory module
+- a `wasm-bindgen` threading expectation that Mina satisfies differently
+- a remaining interaction between shared memory and the generated glue code
+
+### H7. Single-threaded minimal wasm is still needed
+
+Because this first minimal wasm harness is forced through the repo's threaded wasm profile, it cannot yet answer:
+
+- whether the same minimal module works when built without shared memory
+- whether the current timeout is caused by threading setup rather than hashing
+
+That comparison remains a high-priority missing piece.
+
+## Revised immediate next steps
+
+1. Inspect the generated `pkg/wasm_runtime_repro.js` contract and compare it with the known-good Mina wasm init path.
+2. Test whether the minimal threaded module needs explicit `thread_stack_size` or a different initialization object.
+3. Build a truly single-threaded version of the minimal wasm module outside the workspace's forced shared-memory config.
+4. Re-run the same `3317098`-byte matrix on:
+   - minimal JS `WebCrypto`
+   - minimal threaded wasm
+   - minimal single-threaded wasm
+5. Only after the minimal wasm init path is trustworthy, return to the large-digest backend comparison.

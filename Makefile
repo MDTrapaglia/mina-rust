@@ -141,6 +141,16 @@ build-wasm: ## Build WebAssembly node
 		--out-dir pkg \
 		target/wasm32-unknown-unknown/release/mina_node_web.wasm
 
+.PHONY: build-wasm-runtime-repro
+build-wasm-runtime-repro: ## Build the minimal wasm runtime repro harness module
+	@cd tools/wasm-runtime-repro && cargo +${NIGHTLY_RUST_VERSION} \
+		-Z build-std=std,panic_abort \
+		--config 'target.wasm32-unknown-unknown.rustflags=["-C","target-feature=+atomics,+bulk-memory"]' build \
+		--release --target wasm32-unknown-unknown
+	@wasm-bindgen --keep-debug --target web \
+		--out-dir tools/wasm-runtime-repro/pkg \
+		target/wasm32-unknown-unknown/release/wasm_runtime_repro.wasm
+
 .PHONY: build-benches
 build-benches: ## Build all benchmarks without running them
 	@cargo bench --no-run

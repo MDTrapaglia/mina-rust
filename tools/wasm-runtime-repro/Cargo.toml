@@ -1,0 +1,15 @@
+[package]
+name = "wasm-runtime-repro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+console_error_panic_hook = { workspace = true }
+js-sys = { workspace = true }
+sha2 = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
