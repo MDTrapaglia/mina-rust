@@ -13,6 +13,7 @@ const optionalPositiveInt = name => {
 const backend = workerUrl.searchParams.get("backend") ?? "js_webcrypto";
 const wasmProfile = workerUrl.searchParams.get("wasm_profile") ?? "threaded";
 const inputMode = workerUrl.searchParams.get("input_mode") ?? "js_copy";
+const esmTarget = workerUrl.searchParams.get("esm_target") ?? "trivial";
 const sizeBytes = positiveInt("size_bytes", 3317098);
 const chunkSize = positiveInt("chunk_size", 16384);
 const yieldEveryChunks = positiveInt("yield_every_chunks", 4);
@@ -81,11 +82,21 @@ function digestByteLength(digest) {
   return null;
 }
 
+function importTargetRoot(target) {
+  if (target === "single") {
+    return "/tools/wasm-runtime-repro/pkg-single/wasm_runtime_repro.js";
+  }
+  if (target === "threaded") {
+    return "/tools/wasm-runtime-repro/pkg/wasm_runtime_repro.js";
+  }
+  if (target === "trivial") {
+    return "/tools/wasm-runtime-repro/probe-module.js";
+  }
+  throw new Error(`unsupported import target: ${target}`);
+}
+
 async function loadWasmBindings() {
-  const pkgRoot =
-    wasmProfile === "single"
-      ? "/tools/wasm-runtime-repro/pkg-single/wasm_runtime_repro.js"
-      : "/tools/wasm-runtime-repro/pkg/wasm_runtime_repro.js";
+  const pkgRoot = importTargetRoot(wasmProfile);
   trace("wasm.bindings.import.begin", {
     pkgRoot,
   });
@@ -137,12 +148,28 @@ async function runProbe() {
       digestByteLength: digest.byteLength,
     });
   } else {
+    if (backend === "esm_import_only") {
+      const moduleRoot = importTargetRoot(esmTarget);
+      trace("esm.import.begin", {
+        esmTarget,
+        moduleRoot,
+      });
+      const module = await import(moduleRoot);
+      trace("esm.import.complete", {
+        esmTarget,
+        moduleRoot,
+        exportKeys: Object.keys(module).sort(),
+      });
+      digest = new Uint8Array(0);
+    } else {
     const bindings = await loadWasmBindings();
     trace("wasm.bindings.loaded", {
       wasmProfile,
     });
 
-    if (wasmProfile === "threaded") {
+    if (backend === "wasm_import_only") {
+      digest = new Uint8Array(0);
+    } else if (wasmProfile === "threaded") {
       const memory = new WebAssembly.Memory({
         initial: 256,
         maximum: 65536,
@@ -170,7 +197,9 @@ async function runProbe() {
       });
     }
 
-    if (backend === "wasm_one_shot") {
+    if (backend === "wasm_import_only") {
+      // Import-only probe: stop after module evaluation/loading.
+    } else if (backend === "wasm_one_shot") {
       digest =
         inputMode === "wasm_generated"
           ? bindings.sha256_one_shot_generated(sizeBytes)
@@ -201,6 +230,7 @@ async function runProbe() {
             );
     } else {
       throw new Error(`unsupported backend: ${backend}`);
+    }
     }
   }
 

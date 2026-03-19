@@ -602,3 +602,103 @@ Even though the latest single-threaded run did not reach hashing, the harness is
    - worker import without calling any exported function
 3. Re-run the threaded variant with the same extra `import()/init()` traces for symmetry.
 4. Only after both minimal profiles can reliably reach `init.complete`, resume the backend comparison (`WebCrypto` vs wasm `sha2`).
+
+## Result E. Main-thread imports resolve, but worker-side dynamic imports stall even for a trivial ESM module
+
+To separate package-specific evaluation from worker-module loading itself, the harness was extended with:
+
+- `page_import_probe=<single|threaded|trivial>`
+- `skip_worker=1`
+- `backend=esm_import_only`
+- `esm_target=<single|threaded|trivial>`
+- a trivial ESM module at `tools/wasm-runtime-repro/probe-module.js`
+
+This allowed three direct comparisons without rebuilding wasm:
+
+1. Main thread import of `pkg-single`, skipping the worker.
+2. Main thread import of the trivial module, skipping the worker.
+3. Worker-side dynamic import only, without calling `init()` or any hash function.
+
+Observed artifacts:
+
+- main-thread `pkg-single` import:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-browser-page-import-single-v1.html`
+- main-thread trivial import:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-browser-page-import-trivial-v1.html`
+- worker trivial import:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-browser-worker-import-trivial-v2.html`
+- worker `pkg-single` import:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-browser-worker-import-single-esm-v2.html`
+- shared server trace:
+  - `/home/mtrapaglia/mina/logs/wasm-runtime-repro-server-8152-v1.log`
+
+Observed behavior:
+
+- main-thread import of `pkg-single` resolved in ~`36 ms`
+- main-thread import of the trivial module resolved in ~`52 ms`
+- worker-side `await import("/tools/wasm-runtime-repro/probe-module.js")` timed out
+- worker-side `await import("/tools/wasm-runtime-repro/pkg-single/wasm_runtime_repro.js")` also timed out
+
+Most importantly, the worker traces reached:
+
+- `runtime-worker:start`
+- `runtime-worker:esm.import.begin`
+- `GET /tools/wasm-runtime-repro/probe-module.js` for the trivial case
+- `GET /tools/wasm-runtime-repro/pkg-single/wasm_runtime_repro.js` for the generated package case
+
+But they did not reach:
+
+- `runtime-worker:esm.import.complete`
+
+So the active frontier moved again. The current headless pathology is no longer specific to wasm or hashing:
+
+- in this minimal harness, dynamic `import()` inside the worker stalls even for a trivial ESM module
+
+## What changed in the interpretation after Result E
+
+This is a stronger separation than before:
+
+1. Main thread ESM loading is healthy in the same browser session.
+2. Worker startup itself is healthy enough to run code and emit traces.
+3. The worker stall now reproduces before wasm init and before any hash function.
+4. The stall is not specific to `wasm-bindgen` output, because it also reproduces for `probe-module.js`.
+
+That means the currently dominant runtime-repro frontier is:
+
+- dynamic nested module import from within a module worker under headless Chromium
+
+## New working hypotheses after Result E
+
+### H11. The active repro is now a worker-side dynamic `import()` issue, not a wasm issue
+
+Because both:
+
+- `import("/tools/wasm-runtime-repro/probe-module.js")`
+- `import("/tools/wasm-runtime-repro/pkg-single/wasm_runtime_repro.js")`
+
+stall in the worker but succeed on the page main thread, the smallest current repro is no longer “wasm in worker”. It is closer to:
+
+- “dynamic ESM import from a module worker in this headless Chromium runtime can hang after fetch and before import completion”
+
+### H12. Static worker imports should be tested next
+
+The next discriminant is whether the runtime only breaks on:
+
+- dynamic `await import(...)`
+
+or whether it also breaks on:
+
+- static top-level `import ... from "./probe-module.js"`
+
+inside a module worker.
+
+If static imports work and dynamic imports do not, the issue narrows to the dynamic worker-module loader path. If both fail, the issue is broader in worker-side nested module evaluation.
+
+## Revised next steps after Result E
+
+1. Add worker entrypoints with static top-level imports of:
+   - `probe-module.js`
+   - `pkg-single/wasm_runtime_repro.js`
+2. Compare static-import worker behavior against the current dynamic-import worker behavior.
+3. If static imports succeed, minimize further around `await import(...)` in workers and prepare an upstream Chromium-style repro.
+4. If static imports also fail, test the same minimal harness outside headless mode or in another browser to separate “Chromium headless” from “worker module loader” more cleanly.

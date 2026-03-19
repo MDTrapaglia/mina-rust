@@ -42,6 +42,9 @@
       const backend = params.get("backend") ?? "js_webcrypto";
       const wasmProfile = params.get("wasm_profile") ?? "threaded";
       const inputMode = params.get("input_mode") ?? "js_copy";
+      const esmTarget = params.get("esm_target") ?? "trivial";
+      const pageImportProbe = params.get("page_import_probe") ?? "none";
+      const skipWorker = params.get("skip_worker") === "1";
       const sizeBytes = positiveInt("size_bytes", 3317098);
       const chunkSize = positiveInt("chunk_size", 16384);
       const yieldEveryChunks = positiveInt("yield_every_chunks", 4);
@@ -60,6 +63,9 @@
           backend,
           wasmProfile,
           inputMode,
+          esmTarget,
+          pageImportProbe,
+          skipWorker,
           sizeBytes,
           chunkSize,
           yieldEveryChunks,
@@ -71,6 +77,19 @@
           state: "pending",
         },
         errors: [],
+      };
+
+      const importTargetRoot = target => {
+        if (target === "single") {
+          return "/tools/wasm-runtime-repro/pkg-single/wasm_runtime_repro.js";
+        }
+        if (target === "threaded") {
+          return "/tools/wasm-runtime-repro/pkg/wasm_runtime_repro.js";
+        }
+        if (target === "trivial") {
+          return "/tools/wasm-runtime-repro/probe-module.js";
+        }
+        throw new Error(`unsupported import target: ${target}`);
       };
 
       const flush = () => {
@@ -90,7 +109,49 @@
         }).catch(() => undefined);
       };
 
+      async function runPageImportProbe() {
+        if (pageImportProbe === "none") {
+          return;
+        }
+        const pkgRoot = importTargetRoot(pageImportProbe);
+        sendTrace("page.import.begin", JSON.stringify({ pageImportProbe, pkgRoot }));
+        const startedAt = performance.now();
+        try {
+          const module = await import(pkgRoot);
+          result.pageImport = {
+            state: "resolved",
+            elapsedMs: Math.round(performance.now() - startedAt),
+            pageImportProbe,
+            pkgRoot,
+            exportKeys: Object.keys(module).sort(),
+          };
+          sendTrace("page.import.complete", JSON.stringify(result.pageImport));
+        } catch (error) {
+          result.pageImport = {
+            state: "failed",
+            elapsedMs: Math.round(performance.now() - startedAt),
+            pageImportProbe,
+            pkgRoot,
+            message:
+              error instanceof Error ? error.stack ?? error.message : String(error),
+          };
+          sendTrace("page.import.error", JSON.stringify(result.pageImport));
+          throw error;
+        }
+      }
+
       async function main() {
+        await runPageImportProbe();
+
+        if (skipWorker) {
+          result.run = {
+            state: "skipped",
+          };
+          sendTrace("page.skip_worker");
+          flush();
+          return;
+        }
+
         const workerUrl = new URL(
           "/tools/wasm-runtime-repro/runtime-worker.js",
           window.location.origin,
@@ -98,6 +159,7 @@
         workerUrl.searchParams.set("backend", backend);
         workerUrl.searchParams.set("wasm_profile", wasmProfile);
         workerUrl.searchParams.set("input_mode", inputMode);
+        workerUrl.searchParams.set("esm_target", esmTarget);
         workerUrl.searchParams.set("size_bytes", String(sizeBytes));
         workerUrl.searchParams.set("chunk_size", String(chunkSize));
         workerUrl.searchParams.set(
