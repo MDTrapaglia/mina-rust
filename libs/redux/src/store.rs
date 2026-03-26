@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
 use crate::{
@@ -39,14 +42,59 @@ impl<T: Clone> Clone for StateWrapper<T> {
 }
 
 /// Monotonic and system time reference points.
+#[cfg(not(target_arch = "wasm32"))]
 static INITIAL_TIME: OnceLock<(Instant, SystemTime)> = OnceLock::new();
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static INITIAL_TIME: RefCell<Option<(Instant, SystemTime)>> = const { RefCell::new(None) };
+}
+
+fn initial_time_get_or_init(
+    init: impl FnOnce() -> (Instant, SystemTime),
+) -> (Instant, SystemTime) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        *INITIAL_TIME.get_or_init(init)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Lazily initialize per-worker slot if not already set. Prefer explicit
+        // `set_global_initial_time` to set the same origin before spawning workers.
+        INITIAL_TIME.with(|slot| {
+            let mut borrow = slot.borrow_mut();
+            if borrow.is_none() {
+                *borrow = Some(init());
+            }
+            // unwrap is safe because we just ensured it's Some
+            borrow.unwrap()
+        })
+    }
+}
+
+/// Set the global initial time. Call this from the main thread before spawning workers
+/// if you want all workers to share the same time origin.
+pub fn set_global_initial_time(monotonic: Instant, system: SystemTime) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = INITIAL_TIME.get_or_init(|| (monotonic, system));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        INITIAL_TIME.with(|slot| {
+            *slot.borrow_mut() = Some((monotonic, system));
+        })
+    }
+}
 
 /// Converts monotonic time to nanoseconds since Unix epoch.
 ///
 /// If `None` passed, returns result for current time.
 pub fn monotonic_to_time(time: Option<Instant>) -> u64 {
-    let (monotonic, system) = INITIAL_TIME.get_or_init(|| (Instant::now(), SystemTime::now()));
-    let time_passed = time.unwrap_or_else(Instant::now).duration_since(*monotonic);
+    let (monotonic, system) = initial_time_get_or_init(|| (Instant::now(), SystemTime::now()));
+    let time_passed = time.unwrap_or_else(Instant::now).duration_since(monotonic);
     system
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|x| x + time_passed)
@@ -66,7 +114,7 @@ pub struct Store<State, Service, Action> {
 
     /// Current State.
     ///
-    /// Immutable access can be gained using `store.state.get()`.
+    /// Immutable access can be gained using `store.state.get()`. 
     /// Mutation can only happen inside reducer.
     pub state: StateWrapper<State>,
     pub service: Service,
@@ -99,7 +147,11 @@ where
             .map(|x| x.as_nanos())
             .unwrap_or(0);
 
-        INITIAL_TIME.get_or_init(move || (initial_monotonic_time, initial_time));
+        // Ensure the global initial time is set; for wasm this will set the worker-local
+        // slot if it wasn't set previously. Prefer calling `set_global_initial_time`
+        // from the main thread before spawning workers to make all workers share the same
+        // origin.
+        let _ = initial_time_get_or_init(move || (initial_monotonic_time, initial_time));
 
         Self {
             reducer,
